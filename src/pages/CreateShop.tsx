@@ -2,34 +2,42 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SwissHeader } from "@/components/SwissHeader";
 import { useAuth } from "@/hooks/use-auth";
-import { api } from "../convex/_generated/api";
+import { api } from "@/convex/_generated/api";
 import { useMutation } from "convex/react";
-import { Copy, Loader2, Lock, Store } from "lucide-react";
-import { useState } from "react";
+import { Copy, Loader2, Lock } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 
 export default function CreateShop() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, signIn } = useAuth();
   const navigate = useNavigate();
   const createShop = useMutation(api.shops.createShop);
 
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
   const [created, setCreated] = useState<{ shopId: string; code: string } | null>(
     null,
   );
   const [submitting, setSubmitting] = useState(false);
+  const [autoStarted, setAutoStarted] = useState(false);
+
+  // Anonymous sign-in happens automatically so creating a store is one step.
+  useEffect(() => {
+    if (isLoading || isAuthenticated || autoStarted) return;
+    setAutoStarted(true);
+    signIn("anonymous").catch(() => {
+      toast.error("Couldn't start a session — please enable cookies");
+    });
+  }, [isLoading, isAuthenticated, autoStarted, signIn]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const res = await createShop({ name, description });
+      const res = await createShop({ name });
       setCreated(res);
-      toast.success("Shop created");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create shop");
+      toast.error(err instanceof Error ? err.message : "Failed to create store");
     } finally {
       setSubmitting(false);
     }
@@ -55,11 +63,11 @@ export default function CreateShop() {
               <Lock className="size-5 text-primary-foreground" />
             </div>
             <h1 className="text-2xl font-bold uppercase tracking-tight">
-              Shop created
+              Store created
             </h1>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mt-2 text-sm leading-5 text-muted-foreground">
               This is your private sign-in code. Save it — it's how you open
-              your shop's dashboard and see orders.
+              your dashboard and see orders from any device.
             </p>
             <div className="mt-6 flex items-center justify-between border-2 border-foreground bg-muted px-4 py-3">
               <span className="font-mono-swiss text-2xl font-bold tracking-[0.3em]">
@@ -90,10 +98,9 @@ export default function CreateShop() {
             </p>
           </div>
         </div>
-        {/* Reassuring note about the code being stored for the owner */}
         <div className="container-swiss pb-10">
           <p className="grid-label text-center">
-            Keep this code private — anyone with it can manage your shop
+            Keep this code private — anyone with it can manage your store
           </p>
         </div>
       </div>
@@ -103,41 +110,28 @@ export default function CreateShop() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <SwissHeader />
-      <div className="container-swiss max-w-xl py-12 md:py-16">
-        <div className="grid-label mb-6 flex items-center gap-2">
+      <div className="container-swiss flex min-h-[75vh] max-w-xl flex-col justify-center py-12 md:py-16">
+        <div className="grid-label mb-5 flex items-center gap-2">
           <span className="inline-block size-2.5 bg-primary" />
-          Free · takes two minutes
+          Free · one step
         </div>
         <h1 className="text-4xl font-bold uppercase tracking-tight md:text-5xl">
-          Open your shop
+          Name your store
         </h1>
         <p className="mt-4 text-base leading-6 text-muted-foreground">
-          Name it, describe it, get your code. You can change everything later.
+          Type a name and you're in. We'll generate your private sign-in code
+          and take you straight to the dashboard.
         </p>
 
         {isLoading ? (
           <div className="mt-10 border border-foreground p-8 text-center">
             <Loader2 className="mx-auto size-5 animate-spin" />
           </div>
-        ) : !isAuthenticated ? (
-          <div className="mt-10 border-2 border-foreground p-8">
-            <h2 className="text-lg font-bold uppercase">Sign in first</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              A free account keeps your shop claimable only by you, and your
-              code lets anyone you trust manage it.
-            </p>
-            <Button
-              asChild
-              className="mt-6 w-full py-6 text-sm font-bold uppercase tracking-wider"
-            >
-              <Link to="/auth?returnTo=%2Fcreate-shop">Continue to sign in</Link>
-            </Button>
-           </div>
         ) : (
           <form onSubmit={handleSubmit} className="mt-10 space-y-5">
             <div>
               <label htmlFor="shop-name" className="grid-label mb-2 block">
-                Shop name
+                Store name
               </label>
               <Input
                 id="shop-name"
@@ -146,26 +140,11 @@ export default function CreateShop() {
                 placeholder="Juan's Snack Bar"
                 maxLength={40}
                 required
-                className="h-11 border-foreground text-base"
+                className="h-14 border-2 border-foreground text-xl font-bold"
+                autoFocus
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
-                2–40 characters.
-              </p>
-            </div>
-            <div>
-              <label htmlFor="shop-desc" className="grid-label mb-2 block">
-                What do you sell?
-              </label>
-              <Input
-                id="shop-desc"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Fresh snacks, drinks, and school supplies"
-                maxLength={200}
-                className="h-11 border-foreground text-base"
-              />
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Shown on your storefront card. Max 200 characters.
+                2–40 characters. You can change it later in settings.
               </p>
             </div>
             <Button
@@ -176,16 +155,13 @@ export default function CreateShop() {
               {submitting ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
-                <>
-                  <Store className="size-4" />
-                  Create shop & get code
-                </>
+                "Create store & get code"
               )}
             </Button>
             <p className="text-center text-xs text-muted-foreground">
               Already have a code?{" "}
               <Link to="/shop-signin" className="underline hover:text-primary">
-                Sign in to your shop
+                Sign in to your store
               </Link>
             </p>
           </form>

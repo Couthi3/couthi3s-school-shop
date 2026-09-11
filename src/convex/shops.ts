@@ -102,11 +102,11 @@ export const myCodeSession = query({
 /* ---------------------------------- shops --------------------------------- */
 
 export const createShop = mutation({
-  args: { name: v.string(), description: v.string() },
+  args: { name: v.string(), description: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const name = args.name.trim();
-    const description = args.description.trim();
+    const description = (args.description ?? "").trim();
     if (name.length < 2) throw new Error("Shop name is too short");
     if (name.length > 40) throw new Error("Shop name is too long (max 40)");
     if (description.length > 200)
