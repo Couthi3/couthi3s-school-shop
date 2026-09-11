@@ -13,6 +13,7 @@ const schema = defineSchema(
       emailVerificationTime: v.optional(v.number()),
       isAnonymous: v.optional(v.boolean()),
       isAdmin: v.optional(v.boolean()), // site admin, promoted via invite code
+      role: v.optional(v.string()),
     }).index("email", ["email"]),
 
     // A school shop owned by exactly one user.
@@ -26,11 +27,20 @@ const schema = defineSchema(
       .index("by_owner", ["ownerId"])
       .index("by_featured", ["featured", "featuredOrder"]),
 
-    // Permanent secret shop code used to sign in as the shop owner.
+    // Permanent secret shop code used to sign into a shop and manage it.
     shopCodes: defineTable({
       code: v.string(),
       shopId: v.id("shops"),
     }).index("by_code", ["code"]),
+
+    // A signed-in user who has unlocked a shop with its code gets a session,
+    // letting multiple staff manage the same shop.
+    shopSessions: defineTable({
+      userId: v.id("users"),
+      shopId: v.id("shops"),
+    })
+      .index("by_user", ["userId"])
+      .index("by_shop", ["shopId"]),
 
     // Short-lived admin invite codes created by a user in a browser.
     // Redeeming the code promotes that browser's user to the site admin.

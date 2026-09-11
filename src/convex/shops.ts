@@ -1,5 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
+import { Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no lookalike characters
@@ -19,6 +20,84 @@ const requireUserId = async (ctx: QueryCtx | MutationCtx) => {
   if (userId === null) throw new Error("Not signed in");
   return userId;
 };
+
+// Owner OR a user holding an unlocked shop code session may manage the shop.
+const assertShopAccess = async (ctx: QueryCtx | MutationCtx, shopId: Id<"shops">) => {
+  const userId = await getAuthUserId(ctx);
+  if (userId === null) throw new Error("Not signed in");
+  const shop = await ctx.db.get(shopId);
+  if (!shop) throw new Error("Shop not found");
+  if (shop.ownerId === userId) return { userId, shop, viaCode: false };
+  const session = await ctx.db
+    .query("shopSessions")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .filter((q) => q.eq(q.field("shopId"), shopId))
+    .first();
+  if (!session) throw new Error("Not your shop");
+  return { userId, shop, viaCode: true };
+};
+
+/* ------------------------------- code access ------------------------------- */
+
+// Unlock a shop by entering its secret code. Creates a persistent session for
+// the signed-in user so they can manage that shop from any device.
+export const startCodeSession = mutation({
+  args: { code: v.string() },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const code = args.code.trim().toUpperCase();
+    const row = await ctx.db
+      .query("shopCodes")
+      .withIndex("by_code", (q) => q.eq("code", code))
+      .first();
+    if (!row) throw new Error("Code not recognized");
+    const shop = await ctx.db.get(row.shopId);
+    if (!shop) throw new Error("Shop not found");
+    const existing = await ctx.db
+      .query("shopSessions")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .filter((q) => q.eq(q.field("shopId"), row.shopId))
+      .first();
+    if (!existing) {
+      await ctx.db.insert("shopSessions", { userId, shopId: row.shopId });
+    }
+    return { shopId: row.shopId, shopName: shop.name };
+  },
+});
+
+export const endCodeSession = mutation({
+  args: { shopId: v.id("shops") },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const session = await ctx.db
+      .query("shopSessions")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .filter((q) => q.eq(q.field("shopId"), args.shopId))
+      .first();
+    if (session) await ctx.db.delete(session._id);
+  },
+});
+
+// The shop this user has unlocked with a code (not the one they own).
+export const myCodeSession = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return null;
+    const session = await ctx.db
+      .query("shopSessions")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .first();
+    if (!session) return null;
+    const shop = await ctx.db.get(session.shopId);
+    if (!shop) return null;
+    return {
+      shopId: shop._id,
+      shopName: shop.name,
+      isOwner: shop.ownerId === userId,
+    };
+  },
+});
 
 /* ---------------------------------- shops --------------------------------- */
 
@@ -67,10 +146,7 @@ export const myShop = query({
 export const saveShopProfile = mutation({
   args: { shopId: v.id("shops"), name: v.string(), description: v.string() },
   handler: async (ctx, args) => {
-    const userId = await requireUserId(ctx);
-    const shop = await ctx.db.get(args.shopId);
-    if (!shop) throw new Error("Shop not found");
-    if (shop.ownerId !== userId) throw new Error("Not your shop");
+    await assertShopAccess(ctx, args.shopId);
     const name = args.name.trim();
     const description = args.description.trim();
     if (name.length < 2 || name.length > 40)
@@ -82,6 +158,24 @@ export const saveShopProfile = mutation({
 });
 
 /* ------------------------------ public queries ----------------------------- */
+
+// The owner's secret shop code, shown only to the shop owner.
+export const myShopCode = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return null;
+    const shop = await ctx.db
+      .query("shops")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .first();
+    if (!shop) return null;
+    const row = (await ctx.db.query("shopCodes").collect()).find(
+      (r) => r.shopId === shop._id,
+    );
+    return { code: row?.code ?? null, shopName: shop.name };
+  },
+});
 
 export const featuredShops = query({
   args: {},
@@ -150,6 +244,7 @@ export const publicShop = query({
 export const shopItems = query({
   args: { shopId: v.id("shops") },
   handler: async (ctx, args) => {
+    await assertShopAccess(ctx, args.shopId);
     const items = await ctx.db
       .query("items")
       .withIndex("by_shop", (q) => q.eq("shopId", args.shopId))
@@ -168,10 +263,7 @@ export const saveItem = mutation({
     available: v.boolean(),
   },
   handler: async (ctx, args) => {
-    const userId = await requireUserId(ctx);
-    const shop = await ctx.db.get(args.shopId);
-    if (!shop) throw new Error("Shop not found");
-    if (shop.ownerId !== userId) throw new Error("Not your shop");
+    await assertShopAccess(ctx, args.shopId);
 
     const name = args.name.trim();
     if (name.length < 1) throw new Error("Item name is required");
@@ -216,11 +308,9 @@ export const saveItem = mutation({
 export const deleteItem = mutation({
   args: { itemId: v.id("items") },
   handler: async (ctx, args) => {
-    const userId = await requireUserId(ctx);
     const item = await ctx.db.get(args.itemId);
     if (!item) return;
-    const shop = await ctx.db.get(item.shopId);
-    if (!shop || shop.ownerId !== userId) throw new Error("Not your shop");
+    await assertShopAccess(ctx, item.shopId);
     await ctx.db.delete(args.itemId);
   },
 });
@@ -274,10 +364,7 @@ export const placeOrder = mutation({
 export const shopOrders = query({
   args: { shopId: v.id("shops") },
   handler: async (ctx, args) => {
-    const userId = await requireUserId(ctx);
-    const shop = await ctx.db.get(args.shopId);
-    if (!shop) throw new Error("Shop not found");
-    if (shop.ownerId !== userId) throw new Error("Not your shop");
+    await assertShopAccess(ctx, args.shopId);
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_shop", (q) => q.eq("shopId", args.shopId))
@@ -289,11 +376,9 @@ export const shopOrders = query({
 export const setOrderStatus = mutation({
   args: { orderId: v.id("orders"), status: v.string() },
   handler: async (ctx, args) => {
-    const userId = await requireUserId(ctx);
     const order = await ctx.db.get(args.orderId);
     if (!order) throw new Error("Order not found");
-    const shop = await ctx.db.get(order.shopId);
-    if (!shop || shop.ownerId !== userId) throw new Error("Not your shop");
+    await assertShopAccess(ctx, order.shopId);
     if (args.status !== "new" && args.status !== "ready" && args.status !== "delivered")
       throw new Error("Invalid status");
     await ctx.db.patch(args.orderId, {
