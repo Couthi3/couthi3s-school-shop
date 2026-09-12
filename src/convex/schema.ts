@@ -42,12 +42,12 @@ const schema = defineSchema(
       .index("by_user", ["userId"])
       .index("by_shop", ["shopId"]),
 
-    // Short-lived admin invite codes created by a user in a browser.
-    // Redeeming the code promotes that browser's user to the site admin.
-    adminInvites: defineTable({
-      code: v.string(),
+    // Browser sessions granted site-admin access by signing in with the
+    // site administrator credentials on the admin page.
+    adminSessions: defineTable({
+      sessionId: v.string(),
       createdAt: v.number(),
-    }).index("by_code", ["code"]),
+    }).index("by_session", ["sessionId"]),
 
     // Items for sale in a shop.
     items: defineTable({
