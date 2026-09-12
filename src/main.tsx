@@ -5,11 +5,56 @@ import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { InstrumentationProvider } from "@/instrumentation.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
+import { Loader2 } from "lucide-react";
 import { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 import "./types/global.d.ts";
+
+// --- Stale-build recovery ---------------------------------------------------
+// After a new build is deployed, an already-open tab still references old
+// chunk hashes. When a lazy-loaded route chunk can no longer be fetched,
+// reload the page once so the browser picks up the fresh HTML and assets
+// instead of showing a blank screen or a fetch error.
+const STALE_CHUNK_KEY = "swiss-shops:last-stale-reload";
+
+const recoverFromStaleChunk = () => {
+  try {
+    const last = Number(sessionStorage.getItem(STALE_CHUNK_KEY) ?? 0);
+    if (Date.now() - last < 10_000) return; // avoid reload loops
+    sessionStorage.setItem(STALE_CHUNK_KEY, String(Date.now()));
+    window.location.reload();
+  } catch {
+    // sessionStorage unavailable — leave the manual refresh as the fallback.
+  }
+};
+
+const isStaleChunkMessage = (value: unknown) =>
+  typeof value === "string" &&
+  value.includes("Failed to fetch dynamically imported module");
+
+// Resource errors (e.g. a stale <script src="/assets/..."> tag) don't bubble,
+// so listen in the capture phase.
+window.addEventListener(
+  "error",
+  (event) => {
+    const target = event.target;
+    if (target instanceof HTMLScriptElement && target.src.includes("/assets/")) {
+      recoverFromStaleChunk();
+      return;
+    }
+    if (isStaleChunkMessage(event.message)) recoverFromStaleChunk();
+  },
+  true,
+);
+
+// Dynamic-import failures surface as unhandled promise rejections in some
+// browsers.
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason as { message?: unknown } | null;
+  if (isStaleChunkMessage(reason?.message ?? reason)) recoverFromStaleChunk();
+});
 
 // Lazy load route components for better code splitting
 const Landing = lazy(() => import("./pages/Landing.tsx"));
@@ -24,8 +69,8 @@ const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 // Simple loading fallback for route transitions
 function RouteLoading() {
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-pulse text-muted-foreground">Loading...</div>
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <Loader2 className="size-6 animate-spin text-muted-foreground" />
     </div>
   );
 }
