@@ -14,6 +14,8 @@ const schema = defineSchema(
       isAnonymous: v.optional(v.boolean()),
       isAdmin: v.optional(v.boolean()), // site admin, promoted via invite code
       role: v.optional(v.string()),
+      banned: v.optional(v.boolean()), // set by site admin; blocks all shop actions
+      bannedAt: v.optional(v.number()),
     }).index("email", ["email"]),
 
     // A school shop owned by exactly one user.
@@ -31,7 +33,9 @@ const schema = defineSchema(
     shopCodes: defineTable({
       code: v.string(),
       shopId: v.id("shops"),
-    }).index("by_code", ["code"]),
+    })
+      .index("by_code", ["code"])
+      .index("by_shop", ["shopId"]),
 
     // A signed-in user who has unlocked a shop with its code gets a session,
     // letting multiple staff manage the same shop.

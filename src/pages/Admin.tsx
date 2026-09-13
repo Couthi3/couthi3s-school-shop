@@ -1,4 +1,15 @@
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { SwissHeader } from "@/components/SwissHeader";
 import { api } from "../convex/_generated/api";
@@ -7,12 +18,15 @@ import { useMutation, useQuery } from "convex/react";
 import {
   ArrowDown,
   ArrowUp,
+  Ban,
   Loader2,
   LogOut,
   Pin,
   PinOff,
   ShieldCheck,
+  Trash2,
   User,
+  UserCheck,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -30,11 +44,15 @@ export default function Admin() {
   const adminSignOut = useMutation(api.admin.adminSignOut);
   const setFeatured = useMutation(api.admin.setFeatured);
   const moveFeatured = useMutation(api.admin.moveFeatured);
+  const deleteShop = useMutation(api.admin.deleteShop);
+  const setUserBanned = useMutation(api.admin.setUserBanned);
+  const users = useQuery(api.admin.allUsers, adminState?.isAdmin ? {} : "skip");
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [signingIn, setSigningIn] = useState(false);
   const [busyShop, setBusyShop] = useState<string | null>(null);
+  const [busyUser, setBusyUser] = useState<string | null>(null);
 
   // Ensure this browser has an auth session (anonymous) so the admin grant
   // has something to bind to. Runs once; never blocks the form.
@@ -94,6 +112,68 @@ export default function Admin() {
       setBusyShop(null);
     }
   };
+
+  const handleDeleteShop = async (shopId: string) => {
+    setBusyShop(shopId);
+    try {
+      await deleteShop({ shopId: shopId as never });
+      toast.success("Shop deleted permanently");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setBusyShop(null);
+    }
+  };
+
+  const handleSetBanned = async (userId: string, banned: boolean) => {
+    setBusyUser(userId);
+    try {
+      await setUserBanned({ userId: userId as never, banned });
+      toast.success(banned ? "User banned" : "User unbanned");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setBusyUser(null);
+    }
+  };
+
+  const deleteDialog = (shopId: string, shopName: string) => (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button
+          size="icon-sm"
+          variant="outline"
+          className="border-destructive text-destructive"
+          disabled={busyShop === shopId}
+          title="Delete shop"
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent className="border-2 border-foreground sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle className="font-bold uppercase tracking-tight">
+            Delete “{shopName}”?
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            This permanently removes the shop, all its items and orders, and
+            its sign-in code. This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="border-2 border-foreground">
+            Cancel
+          </AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-white hover:bg-destructive/90"
+            onClick={() => handleDeleteShop(shopId)}
+          >
+            Delete permanently
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 
   if (adminState === undefined) {
     return (
@@ -221,6 +301,7 @@ export default function Admin() {
                               <PinOff className="size-3.5" />
                               Unpin
                             </Button>
+                            {deleteDialog(shop._id, shop.name)}
                           </div>
                         </div>
                       ))}
@@ -265,17 +346,88 @@ export default function Admin() {
                             >
                               <Link to={`/shop/${shop._id}`}>View</Link>
                             </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 border-foreground"
+                            disabled={busyShop === shop._id}
+                            onClick={() => toggleFeatured(shop._id, true)}
+                          >
+                            <Pin className="size-3.5" />
+                            Pin
+                          </Button>
+                          {deleteDialog(shop._id, shop.name)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {/* Users & moderation */}
+                <section className="mt-12">
+                  <h2 className="mb-5 text-xl font-bold uppercase">
+                    Users
+                    <span className="ml-2 font-mono-swiss text-sm text-muted-foreground">
+                      {users?.length ?? 0}
+                    </span>
+                  </h2>
+                  {users === undefined ? (
+                    <div className="py-6 text-center">
+                      <Loader2 className="mx-auto size-5 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : users.length === 0 ? (
+                    <div className="border-2 border-dashed border-foreground p-8 text-center text-sm text-muted-foreground">
+                      No accounts yet.
+                    </div>
+                  ) : (
+                    <div className="border-2 border-foreground">
+                      {users.map((u) => (
+                        <div
+                          key={u._id}
+                          className="flex flex-wrap items-center gap-3 border-b border-border px-5 py-4 last:border-b-0"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <span className="block truncate font-bold uppercase">
+                              {u.name || u.email || "Guest"}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {u.isAnonymous ? "Guest session" : "Account"}
+                              {u.isAdmin ? " · admin" : ""}
+                              {u.banned
+                                ? ` · banned${
+                                    u.bannedAt
+                                      ? ` ${new Date(u.bannedAt).toLocaleDateString()}`
+                                      : ""
+                                  }`
+                                : ""}
+                            </span>
+                          </div>
+                          {!u.isAdmin && (
                             <Button
                               size="sm"
                               variant="outline"
-                              className="gap-1.5 border-foreground"
-                              disabled={busyShop === shop._id}
-                              onClick={() => toggleFeatured(shop._id, true)}
+                              className={
+                                u.banned
+                                  ? "gap-1.5 border-foreground"
+                                  : "gap-1.5 border-destructive text-destructive"
+                              }
+                              disabled={busyUser === u._id}
+                              onClick={() => handleSetBanned(u._id, !u.banned)}
                             >
-                              <Pin className="size-3.5" />
-                              Pin
+                              {u.banned ? (
+                                <>
+                                  <UserCheck className="size-3.5" />
+                                  Unban
+                                </>
+                              ) : (
+                                <>
+                                  <Ban className="size-3.5" />
+                                  Ban
+                                </>
+                              )}
                             </Button>
-                          </div>
+                          )}
                         </div>
                       ))}
                     </div>

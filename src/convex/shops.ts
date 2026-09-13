@@ -22,11 +22,14 @@ const requireUserId = async (ctx: QueryCtx | MutationCtx) => {
 };
 
 // Owner OR a user holding an unlocked shop code session may manage the shop.
+// Banned users are locked out of all shop actions.
 const assertShopAccess = async (ctx: QueryCtx | MutationCtx, shopId: Id<"shops">) => {
   const userId = await getAuthUserId(ctx);
   if (userId === null) throw new Error("Not signed in");
   const shop = await ctx.db.get(shopId);
   if (!shop) throw new Error("Shop not found");
+  const user = await ctx.db.get(userId);
+  if (user?.banned === true) throw new Error("Your account has been suspended");
   if (shop.ownerId === userId) return { userId, shop, viaCode: false };
   const session = await ctx.db
     .query("shopSessions")
@@ -53,6 +56,9 @@ export const startCodeSession = mutation({
     if (!row) throw new Error("Code not recognized");
     const shop = await ctx.db.get(row.shopId);
     if (!shop) throw new Error("Shop not found");
+    const user = await ctx.db.get(userId);
+    if (user?.banned === true)
+      throw new Error("Your account has been suspended");
     const existing = await ctx.db
       .query("shopSessions")
       .withIndex("by_user", (q) => q.eq("userId", userId))
@@ -105,6 +111,8 @@ export const createShop = mutation({
   args: { name: v.string(), description: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
+    const user = await ctx.db.get(userId);
+    if (user?.banned === true) throw new Error("Your account has been suspended");
     const name = args.name.trim();
     const description = (args.description ?? "").trim();
     if (name.length < 2) throw new Error("Shop name is too short");
@@ -184,7 +192,13 @@ export const featuredShops = query({
       .query("shops")
       .withIndex("by_featured", (q) => q.eq("featured", true))
       .collect();
-    return shops.sort((a, b) => a.featuredOrder - b.featuredOrder);
+    // Hide shops whose owner has been banned by the site admin.
+    const visible = [];
+    for (const shop of shops) {
+      const owner = await ctx.db.get(shop.ownerId);
+      if (owner?.banned !== true) visible.push(shop);
+    }
+    return visible.sort((a, b) => a.featuredOrder - b.featuredOrder);
   },
 });
 
@@ -192,7 +206,13 @@ export const allShops = query({
   args: {},
   handler: async (ctx) => {
     const shops = await ctx.db.query("shops").collect();
-    return shops
+    // Hide shops whose owner has been banned by the site admin.
+    const visible = [];
+    for (const shop of shops) {
+      const owner = await ctx.db.get(shop.ownerId);
+      if (owner?.banned !== true) visible.push(shop);
+    }
+    return visible
       .map((s) => ({ _id: s._id, name: s.name, description: s.description }))
       .sort((a, b) => a.name.localeCompare(b.name));
   },
@@ -218,6 +238,9 @@ export const publicShop = query({
   handler: async (ctx, args) => {
     const shop = await ctx.db.get(args.shopId);
     if (!shop) return null;
+    // Banned owners' storefronts are taken offline.
+    const owner = await ctx.db.get(shop.ownerId);
+    if (owner?.banned === true) return null;
     const items = await ctx.db
       .query("items")
       .withIndex("by_shop", (q) => q.eq("shopId", args.shopId))
@@ -329,6 +352,12 @@ export const placeOrder = mutation({
   handler: async (ctx, args) => {
     const shop = await ctx.db.get(args.shopId);
     if (!shop) throw new Error("Shop not found");
+    const userId = await getAuthUserId(ctx);
+    if (userId !== null) {
+      const user = await ctx.db.get(userId);
+      if (user?.banned === true)
+        throw new Error("Your account has been suspended");
+    }
     const item = await ctx.db.get(args.itemId);
     if (!item || item.shopId !== args.shopId)
       throw new Error("Item not found in this shop");
