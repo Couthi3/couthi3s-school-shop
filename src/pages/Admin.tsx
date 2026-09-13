@@ -93,6 +93,10 @@ export default function Admin() {
   );
   const updateTicket = useMutation(api.support.updateTicket);
   const deleteTicket = useMutation(api.support.deleteTicket);
+  // Only the Owner account (Couthi3) may manage the roster — matches the
+  // server-side requireHeadAdmin gate.
+  const isHeadAdmin = useQuery(api.support.isHeadAdmin);
+  const canManageTeam = adminState?.isAdmin === true && isHeadAdmin === true;
   const teamMembers = useQuery(api.team.teamMembers);
   const addTeamMember = useMutation(api.team.addTeamMember);
   const updateTeamMember = useMutation(api.team.updateTeamMember);
@@ -986,7 +990,8 @@ export default function Admin() {
                   )}
                 </section>
 
-                {/* Team roster management */}
+                {/* Team roster management — Owner account only */}
+                {canManageTeam && (
                 <section className="mt-12">
                   <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                     <h2 className="text-xl font-bold uppercase">
@@ -1117,6 +1122,7 @@ export default function Admin() {
                     </div>
                   )}
                 </section>
+                )}
 
                 {/* Edit shop dialog */}
                 <Dialog

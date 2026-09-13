@@ -21,6 +21,47 @@ export const requireAdmin = async (ctx: QueryCtx | MutationCtx) => {
   if (!grant) throw new Error("Admin access required");
 };
 
+/**
+ * The single account allowed to manage staff ranks: the site owner's
+ * credential account. Must match ADMIN_USERNAME in admin.ts.
+ */
+export const HEAD_ADMIN_USERNAME = "Couthi3";
+
+/**
+ * Stricter than requireAdmin: only the Owner account (Couthi3) passes —
+ * either the flagged user with that exact username, or a browser session
+ * granted admin by signing in with the owner credentials.
+ */
+export const requireHeadAdmin = async (ctx: QueryCtx | MutationCtx) => {
+  const userId = await getAuthUserId(ctx);
+  if (userId !== null) {
+    const user = await ctx.db.get(userId);
+    if (user?.isAdmin === true && user.name === HEAD_ADMIN_USERNAME) return;
+  }
+  const sessionId = await getAuthSessionId(ctx);
+  if (sessionId === null)
+    throw new Error("Only the Owner account can manage staff ranks");
+  const grant = await ctx.db
+    .query("adminSessions")
+    .withIndex("by_session", (q) => q.eq("sessionId", sessionId))
+    .first();
+  if (!grant)
+    throw new Error("Only the Owner account can manage staff ranks");
+};
+
+/** Whether the current viewer is the Owner account (for hiding UI). */
+export const isHeadAdmin = query({
+  args: {},
+  handler: async (ctx) => {
+    try {
+      await requireHeadAdmin(ctx);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+});
+
 /* ------------------------------ user functions ---------------------------- */
 
 /**

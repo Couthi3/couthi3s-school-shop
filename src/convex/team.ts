@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
-import { requireAdmin } from "./support";
+import { requireHeadAdmin } from "./support";
 import { isTeamRank, RANK_LEVEL, type TeamRank } from "./teamRanks";
 
 /* -------------------------------- public ---------------------------------- */
@@ -42,7 +42,7 @@ export const teamMembers = query({
 export const generateUploadUrl = mutation({
   args: {},
   handler: async (ctx) => {
-    await requireAdmin(ctx);
+    await requireHeadAdmin(ctx);
     return await ctx.storage.generateUploadUrl();
   },
 });
@@ -56,7 +56,7 @@ export const addTeamMember = mutation({
     imageId: v.optional(v.id("_storage")),
   },
   handler: async (ctx, args) => {
-    await requireAdmin(ctx);
+    await requireHeadAdmin(ctx);
 
     const name = args.name.trim();
     const rank = args.rank.trim();
@@ -89,7 +89,7 @@ export const updateTeamMember = mutation({
     imageId: v.optional(v.union(v.id("_storage"), v.null())),
   },
   handler: async (ctx, args) => {
-    await requireAdmin(ctx);
+    await requireHeadAdmin(ctx);
     const member = await ctx.db.get(args.memberId);
     if (!member) throw new Error("Team member not found");
 
@@ -116,7 +116,7 @@ export const updateTeamMember = mutation({
 export const removeTeamMember = mutation({
   args: { memberId: v.id("teamMembers") },
   handler: async (ctx, args) => {
-    await requireAdmin(ctx);
+    await requireHeadAdmin(ctx);
     const member = await ctx.db.get(args.memberId);
     if (!member) return;
     if (member.imageId) await ctx.storage.delete(member.imageId);
@@ -131,7 +131,7 @@ export const moveTeamMember = mutation({
     direction: v.union(v.literal("up"), v.literal("down")),
   },
   handler: async (ctx, args) => {
-    await requireAdmin(ctx);
+    await requireHeadAdmin(ctx);
     const members = (await ctx.db.query("teamMembers").collect()).sort(
       (a, b) => a.sortOrder - b.sortOrder,
     );
