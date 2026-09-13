@@ -23,7 +23,10 @@ export function SwissHeader() {
   return (
     <header className="border-b-2 border-foreground bg-background">
       <div className="container-swiss flex h-14 items-center justify-between">
-        <Link to="/" className="flex items-center gap-3">
+        <Link
+          to={isAuthenticated ? "/shops" : "/"}
+          className="flex items-center gap-3"
+        >
           <span className="flex size-6 items-center justify-center bg-primary">
             <Store className="size-4 text-primary-foreground" strokeWidth={2.5} />
           </span>
