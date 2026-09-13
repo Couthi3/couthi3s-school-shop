@@ -168,7 +168,7 @@ export default function Landing() {
               {
                 n: "01",
                 title: "Open a shop",
-                body: "Sign in with your email and name your shop. It's free, and you get a private code that signs you in from any device.",
+                body: "Name your shop — no account needed. It's free, and you get a private code that signs you in from any device.",
               },
               {
                 n: "02",

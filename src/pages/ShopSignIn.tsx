@@ -50,8 +50,9 @@ export default function ShopSignIn() {
           <div className="mt-10 border-2 border-foreground p-8">
             <h2 className="text-lg font-bold uppercase">Sign in first</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Sign in with your email, then enter your shop code. The code is
-              what grants access — your email just holds the session.
+              Create an account with a username and password, then enter your
+              shop code. The code is what grants access — your account just
+              holds the session.
             </p>
             <Button
               asChild

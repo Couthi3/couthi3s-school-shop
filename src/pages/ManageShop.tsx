@@ -226,7 +226,8 @@ export default function ManageShop() {
         <div className="container-swiss max-w-md py-20 text-center">
           <h1 className="text-2xl font-bold uppercase">Sign in required</h1>
           <p className="mt-3 text-sm text-muted-foreground">
-            Sign in with your email, then enter your shop code to manage it.
+            Create an account with a username and password, then enter your
+            shop code to manage it.
           </p>
           <Button asChild className="mt-6 w-full py-6 text-sm font-bold uppercase tracking-wider">
             <Link to="/auth?returnTo=%2Fmanage">Continue to sign in</Link>

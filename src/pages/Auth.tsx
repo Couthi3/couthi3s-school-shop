@@ -1,15 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SwissHeader } from "@/components/SwissHeader";
-import {
-  InputOTP,
-  InputOTPGroup,
-  InputOTPSlot,
-} from "@/components/ui/input-otp";
 import { useAuth } from "@/hooks/use-auth";
-import { ArrowRight, Loader2, Mail } from "lucide-react";
+import { Loader2, ShieldCheck, User } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
+import { toast } from "sonner";
 
 interface AuthProps {
   redirectAfterAuth?: string;
@@ -33,8 +30,10 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     searchParams.get("returnTo"),
     redirectAfterAuth,
   );
-  const [step, setStep] = useState<"signIn" | { email: string }>("signIn");
-  const [otp, setOtp] = useState("");
+
+  const [mode, setMode] = useState<"signIn" | "signUp">("signIn");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,38 +43,30 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   }, [authLoading, isAuthenticated, navigate, redirect]);
 
-  const handleEmailSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
     setError(null);
+    const flow = mode === "signIn" ? "signIn" : "signUp";
     try {
-      const formData = new FormData(event.currentTarget);
-      await signIn("email-otp", formData);
-      setStep({ email: formData.get("email") as string });
-    } catch (error) {
-      console.error("Email sign-in error:", error);
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Failed to send verification code. Please try again.",
+      await signIn("password", {
+        username: username.trim(),
+        password,
+        flow,
+      });
+      toast.success(
+        mode === "signIn" ? "Welcome back" : "Account created — you're in",
       );
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleOtpSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setIsLoading(true);
-    setError(null);
-    try {
-      const formData = new FormData(event.currentTarget);
-      await signIn("email-otp", formData);
       navigate(redirect);
-    } catch (error) {
-      console.error("OTP verification error:", error);
-      setError("The verification code you entered is incorrect.");
-      setOtp("");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setError(
+        mode === "signUp" && message.includes("already")
+          ? "That username is taken — try signing in instead."
+          : mode === "signIn"
+            ? "Incorrect username or password."
+            : message,
+      );
     } finally {
       setIsLoading(false);
     }
@@ -86,127 +77,106 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       <SwissHeader />
 
       <div className="container-swiss flex min-h-[80vh] max-w-md flex-col justify-center py-12">
-        {step === "signIn" ? (
-          <>
-            <div className="grid-label mb-5 flex items-center gap-2">
-              <span className="inline-block size-2.5 bg-primary" />
-              Sign in
-            </div>
-            <h1 className="text-3xl font-bold uppercase tracking-tight md:text-4xl">
-              Get started
-            </h1>
-            <p className="mt-3 text-sm leading-5 text-muted-foreground">
-              Enter your email to log in or create a free account. We'll send
-              you a six-digit code.
-            </p>
+        <div className="grid-label mb-5 flex items-center gap-2">
+          <span className="inline-block size-2.5 bg-primary" />
+          {mode === "signIn" ? "Sign in" : "Create account"}
+        </div>
+        <h1 className="text-3xl font-bold uppercase tracking-tight md:text-4xl">
+          {mode === "signIn" ? "Welcome back" : "Make your account"}
+        </h1>
+        <p className="mt-3 text-sm leading-5 text-muted-foreground">
+          {mode === "signIn"
+            ? "Log in with your username and password."
+            : "Pick a username and a password. No email needed."}
+        </p>
 
-            <form onSubmit={handleEmailSubmit} className="mt-8 space-y-4">
-              <div>
-                <label htmlFor="email" className="grid-label mb-2 block">
-                  Email address
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    id="email"
-                    name="email"
-                    placeholder="name@example.com"
-                    type="email"
-                    className="h-12 border-foreground pl-9"
-                    disabled={isLoading}
-                    required
-                  />
-                </div>
-              </div>
-              {error && (
-                <p className="border-l-4 border-destructive bg-destructive/10 px-3 py-2 text-sm">
-                  {error}
-                </p>
-              )}
-              <Button
-                type="submit"
-                disabled={isLoading}
-                className="h-12 w-full text-sm font-bold uppercase tracking-wider"
-              >
-                {isLoading ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <>
-                    Continue
-                    <ArrowRight className="size-4" />
-                  </>
-                )}
-              </Button>
-            </form>
-          </>
-        ) : (
-          <>
-            <div className="grid-label mb-5 flex items-center gap-2">
-              <span className="inline-block size-2.5 bg-primary" />
-              Verify
-            </div>
-            <h1 className="text-3xl font-bold uppercase tracking-tight md:text-4xl">
-              Check your email
-            </h1>
-            <p className="mt-3 text-sm leading-5 text-muted-foreground">
-              We sent a six-digit code to {step.email}. It expires in 15
-              minutes.
-            </p>
+        <Tabs
+          value={mode}
+          onValueChange={(v) => {
+            setMode(v as "signIn" | "signUp");
+            setError(null);
+          }}
+          className="mt-6"
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="signIn">Sign in</TabsTrigger>
+            <TabsTrigger value="signUp">Sign up</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
-            <form onSubmit={handleOtpSubmit} className="mt-8 space-y-5">
-              <input type="hidden" name="email" value={step.email} />
-              <input type="hidden" name="code" value={otp} />
-              <InputOTP
-                value={otp}
-                onChange={setOtp}
-                maxLength={6}
-                disabled={isLoading}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && otp.length === 6 && !isLoading) {
-                    const form = (e.target as HTMLElement).closest("form");
-                    if (form) form.requestSubmit();
-                  }
-                }}
-              >
-                <InputOTPGroup>
-                  {Array.from({ length: 6 }).map((_, index) => (
-                    <InputOTPSlot key={index} index={index} />
-                  ))}
-                </InputOTPGroup>
-              </InputOTP>
-              {error && (
-                <p className="border-l-4 border-destructive bg-destructive/10 px-3 py-2 text-sm">
-                  {error}
-                </p>
-              )}
-              <Button
-                type="submit"
-                disabled={isLoading || otp.length !== 6}
-                className="h-12 w-full text-sm font-bold uppercase tracking-wider"
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" />
-                    Verifying…
-                  </>
-                ) : (
-                  <>
-                    Verify code
-                    <ArrowRight className="size-4" />
-                  </>
-                )}
-              </Button>
-              <button
-                type="button"
-                onClick={() => setStep("signIn")}
-                disabled={isLoading}
-                className="w-full text-center text-xs text-muted-foreground underline hover:text-primary"
-              >
-                Use a different email
-              </button>
-            </form>
-          </>
-        )}
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <div>
+            <label htmlFor="username" className="grid-label mb-2 block">
+              Username
+            </label>
+            <Input
+              id="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="juan.premium"
+              autoComplete="username"
+              className="h-12 border-2 border-foreground"
+              disabled={isLoading}
+              required
+            />
+          </div>
+          <div>
+            <label htmlFor="password" className="grid-label mb-2 block">
+              Password
+            </label>
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={mode === "signUp" ? "At least 8 characters" : "••••••••"}
+              autoComplete={mode === "signUp" ? "new-password" : "current-password"}
+              className="h-12 border-2 border-foreground"
+              disabled={isLoading}
+              required
+              minLength={mode === "signUp" ? 8 : undefined}
+            />
+          </div>
+          {error && (
+            <p className="border-l-4 border-destructive bg-destructive/10 px-3 py-2 text-sm">
+              {error}
+            </p>
+          )}
+          <Button
+            type="submit"
+            disabled={isLoading || !username.trim() || !password}
+            className="h-12 w-full text-sm font-bold uppercase tracking-wider"
+          >
+            {isLoading ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : mode === "signIn" ? (
+              <>
+                <ShieldCheck className="size-4" />
+                Sign in
+              </>
+            ) : (
+              <>
+                <User className="size-4" />
+                Create account
+              </>
+            )}
+          </Button>
+        </form>
+
+        <p className="mt-6 text-center text-xs text-muted-foreground">
+          Opening a shop doesn't need an account — you just need a store name at{" "}
+          <a
+            href="/create-shop"
+            className="underline hover:text-primary"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate("/create-shop");
+            }}
+          >
+            Open a shop
+          </a>
+          .
+        </p>
       </div>
     </div>
   );
