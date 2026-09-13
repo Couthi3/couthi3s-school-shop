@@ -10,7 +10,16 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { SwissHeader } from "@/components/SwissHeader";
 import { api } from "../convex/_generated/api";
 import { useAuthActions } from "@convex-dev/auth/react";
@@ -19,8 +28,11 @@ import {
   ArrowDown,
   ArrowUp,
   Ban,
+  KeyRound,
   Loader2,
   LogOut,
+  Megaphone,
+  Pencil,
   Pin,
   PinOff,
   ShieldCheck,
@@ -48,11 +60,94 @@ export default function Admin() {
   const setUserBanned = useMutation(api.admin.setUserBanned);
   const users = useQuery(api.admin.allUsers, adminState?.isAdmin ? {} : "skip");
 
+  // New admin powers
+  const stats = useQuery(api.admin.siteStats, adminState?.isAdmin ? {} : "skip");
+  const announcements = useQuery(
+    api.admin.allAnnouncements,
+    adminState?.isAdmin ? {} : "skip",
+  );
+  const postAnnouncement = useMutation(api.admin.postAnnouncement);
+  const clearAnnouncement = useMutation(api.admin.clearAnnouncement);
+  const deleteAnnouncement = useMutation(api.admin.deleteAnnouncement);
+  const adminUpdateShop = useMutation(api.admin.adminUpdateShop);
+  const adminResetShopCode = useMutation(api.admin.adminResetShopCode);
+
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [signingIn, setSigningIn] = useState(false);
   const [busyShop, setBusyShop] = useState<string | null>(null);
   const [busyUser, setBusyUser] = useState<string | null>(null);
+
+  // Announcements
+  const [announcementText, setAnnouncementText] = useState("");
+  const [postingAnnouncement, setPostingAnnouncement] = useState(false);
+
+  // Edit-shop dialog
+  const [editShop, setEditShop] = useState<{ id: string; name: string; description: string } | null>(null);
+  const [savingShop, setSavingShop] = useState(false);
+
+  const handlePostAnnouncement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!announcementText.trim()) return;
+    setPostingAnnouncement(true);
+    try {
+      await postAnnouncement({ text: announcementText });
+      setAnnouncementText("");
+      toast.success("Announcement posted — visible on every page");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setPostingAnnouncement(false);
+    }
+  };
+
+  const handleClearAnnouncement = async (id: string) => {
+    try {
+      await clearAnnouncement({ announcementId: id as never });
+      toast.success("Announcement taken down");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  };
+
+  const handleDeleteAnnouncement = async (id: string) => {
+    try {
+      await deleteAnnouncement({ announcementId: id as never });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  };
+
+  const handleSaveShopEdit = async () => {
+    if (!editShop) return;
+    setSavingShop(true);
+    try {
+      await adminUpdateShop({
+        shopId: editShop.id as never,
+        name: editShop.name,
+        description: editShop.description,
+      });
+      toast.success("Shop updated");
+      setEditShop(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setSavingShop(false);
+    }
+  };
+
+  const handleResetCode = async (shopId: string) => {
+    setBusyShop(shopId);
+    try {
+      const result = await adminResetShopCode({ shopId: shopId as never });
+      await navigator.clipboard.writeText(result.code).catch(() => {});
+      toast.success(`New code ${result.code} (copied to clipboard)`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setBusyShop(null);
+    }
+  };
 
   // Ensure this browser has an auth session (anonymous) so the admin grant
   // has something to bind to. Runs once; never blocks the form.
@@ -207,7 +302,7 @@ export default function Admin() {
           <>
             <div className="flex flex-wrap items-end justify-between gap-4">
               <h1 className="text-4xl font-bold uppercase tracking-tight md:text-5xl">
-                Featured stores
+                Admin control panel
               </h1>
               <Button
                 variant="outline"
@@ -218,8 +313,119 @@ export default function Admin() {
                 Exit admin
               </Button>
             </div>
-            <p className="mt-4 max-w-xl text-base leading-6 text-muted-foreground">
-              Hand-pick the shops that appear on the home page. Pinned shops
+
+            {/* Site stats */}
+            <section className="mt-8 grid grid-cols-2 gap-px border-2 border-foreground bg-foreground sm:grid-cols-4">
+              {[
+                { label: "Shops", value: stats?.shops ?? 0 },
+                { label: "Accounts", value: stats?.users ?? 0 },
+                { label: "Items", value: stats?.items ?? 0 },
+                { label: "Orders", value: stats?.orders ?? 0 },
+              ].map((s) => (
+                <div key={s.label} className="bg-background px-4 py-3">
+                  <div className="grid-label">{s.label}</div>
+                  <div className="font-mono-swiss mt-1 text-2xl font-bold">
+                    {stats === undefined ? "—" : s.value}
+                  </div>
+                </div>
+              ))}
+            </section>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {stats === undefined
+                ? "Loading stats…"
+                : `${stats.featuredShops} pinned · ${stats.bannedUsers} banned accounts · $${(
+                    stats.revenueCents / 100
+                  ).toFixed(2)} total order volume`}
+            </p>
+
+            {/* Global announcements */}
+            <section className="mt-10">
+              <h2 className="mb-4 text-xl font-bold uppercase">Announcement</h2>
+              <form
+                onSubmit={handlePostAnnouncement}
+                className="max-w-2xl border-2 border-foreground p-4"
+              >
+                <div className="flex items-center gap-2">
+                  <Megaphone className="size-4 text-primary" />
+                  <span className="grid-label">Post a message to every page</span>
+                </div>
+                <Textarea
+                  value={announcementText}
+                  onChange={(e) => setAnnouncementText(e.target.value)}
+                  placeholder="e.g. The school store closes Friday — get your orders in!"
+                  maxLength={200}
+                  rows={2}
+                  className="mt-3 resize-none border-foreground"
+                />
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">
+                    {announcementText.length}/200 · replaces the current
+                    announcement
+                  </span>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={
+                      postingAnnouncement || !announcementText.trim()
+                    }
+                    className="gap-1.5"
+                  >
+                    {postingAnnouncement ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Megaphone className="size-3.5" />
+                    )}
+                    Publish
+                  </Button>
+                </div>
+              </form>
+              {announcements !== undefined && announcements.length > 0 && (
+                <div className="mt-4 max-w-2xl border-2 border-foreground">
+                  {announcements.slice(0, 8).map((a) => (
+                    <div
+                      key={a._id}
+                      className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0"
+                    >
+                      <span
+                        className={`inline-block size-2 shrink-0 ${
+                          a.active ? "bg-primary" : "bg-muted-foreground/40"
+                        }`}
+                        title={a.active ? "Live" : "Retired"}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm">{a.text}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {new Date(a.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                      {a.active && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-foreground"
+                          onClick={() => handleClearAnnouncement(a._id)}
+                        >
+                          Take down
+                        </Button>
+                      )}
+                      {!a.active && (
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          title="Delete from history"
+                          onClick={() => handleDeleteAnnouncement(a._id)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <p className="mt-10 max-w-xl text-base leading-6 text-muted-foreground">
+              Hand-pick the shops that appear on the explore page. Pinned shops
               show first, in the order you set.
             </p>
 
@@ -267,6 +473,31 @@ export default function Admin() {
                               className="text-xs uppercase"
                             >
                               <Link to={`/shop/${shop._id}`}>View</Link>
+                            </Button>
+                            <Button
+                              size="icon-sm"
+                              variant="outline"
+                              className="border-foreground"
+                              title="Edit name / description"
+                              onClick={() =>
+                                setEditShop({
+                                  id: shop._id,
+                                  name: shop.name,
+                                  description: shop.description || "",
+                                })
+                              }
+                            >
+                              <Pencil className="size-3.5" />
+                            </Button>
+                            <Button
+                              size="icon-sm"
+                              variant="outline"
+                              className="border-foreground"
+                              disabled={busyShop === shop._id}
+                              title="Reset sign-in code (old code stops working)"
+                              onClick={() => handleResetCode(shop._id)}
+                            >
+                              <KeyRound className="size-3.5" />
                             </Button>
                             <Button
                               size="icon-sm"
@@ -345,6 +576,31 @@ export default function Admin() {
                               className="text-xs uppercase"
                             >
                               <Link to={`/shop/${shop._id}`}>View</Link>
+                            </Button>
+                            <Button
+                              size="icon-sm"
+                              variant="outline"
+                              className="border-foreground"
+                              title="Edit name / description"
+                              onClick={() =>
+                                setEditShop({
+                                  id: shop._id,
+                                  name: shop.name,
+                                  description: shop.description || "",
+                                })
+                              }
+                            >
+                              <Pencil className="size-3.5" />
+                            </Button>
+                            <Button
+                              size="icon-sm"
+                              variant="outline"
+                              className="border-foreground"
+                              disabled={busyShop === shop._id}
+                              title="Reset sign-in code (old code stops working)"
+                              onClick={() => handleResetCode(shop._id)}
+                            >
+                              <KeyRound className="size-3.5" />
                             </Button>
                           <Button
                             size="sm"
@@ -433,6 +689,88 @@ export default function Admin() {
                     </div>
                   )}
                 </section>
+
+                {/* Edit shop dialog */}
+                <Dialog
+                  open={editShop !== null}
+                  onOpenChange={(open) => !open && setEditShop(null)}
+                >
+                  <DialogContent className="border-2 border-foreground sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle className="font-bold uppercase tracking-tight">
+                        Edit shop
+                      </DialogTitle>
+                      <DialogDescription>
+                        Fix an inappropriate name or description without
+                        deleting the shop. Changes go live immediately.
+                      </DialogDescription>
+                    </DialogHeader>
+                    {editShop && (
+                      <div className="space-y-4">
+                        <div>
+                          <label
+                            htmlFor="edit-shop-name"
+                            className="grid-label mb-1.5 block"
+                          >
+                            Shop name
+                          </label>
+                          <Input
+                            id="edit-shop-name"
+                            value={editShop.name}
+                            onChange={(e) =>
+                              setEditShop({ ...editShop, name: e.target.value })
+                            }
+                            maxLength={40}
+                            className="h-11 border-foreground"
+                          />
+                        </div>
+                        <div>
+                          <label
+                            htmlFor="edit-shop-desc"
+                            className="grid-label mb-1.5 block"
+                          >
+                            Description
+                          </label>
+                          <Textarea
+                            id="edit-shop-desc"
+                            value={editShop.description}
+                            onChange={(e) =>
+                              setEditShop({
+                                ...editShop,
+                                description: e.target.value,
+                              })
+                            }
+                            maxLength={200}
+                            rows={3}
+                            className="resize-none border-foreground"
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        onClick={() => setEditShop(null)}
+                        className="border-foreground"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleSaveShopEdit}
+                        disabled={
+                          savingShop ||
+                          !editShop ||
+                          editShop.name.trim().length < 2
+                        }
+                      >
+                        {savingShop && (
+                          <Loader2 className="size-4 animate-spin" />
+                        )}
+                        Save changes
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </>
             )}
           </>

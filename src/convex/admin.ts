@@ -248,3 +248,179 @@ export const moveFeatured = mutation({
 
 // keep requireUserId referenced for future admin mutations
 void requireUserId;
+
+/* ------------------------------- site stats ------------------------------- */
+
+// Platform-wide counts for the admin dashboard.
+export const siteStats = query({
+  args: {},
+  handler: async (ctx) => {
+    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+
+    const [shops, users, items, orders, codes] = await Promise.all([
+      ctx.db.query("shops").collect(),
+      ctx.db.query("users").collect(),
+      ctx.db.query("items").collect(),
+      ctx.db.query("orders").collect(),
+      ctx.db.query("shopCodes").collect(),
+    ]);
+
+    const realUsers = users.filter((u) => u.isAnonymous !== true);
+    const revenue = orders.reduce(
+      (sum, o) => sum + o.priceCents * o.quantity,
+      0,
+    );
+
+    return {
+      shops: shops.length,
+      featuredShops: shops.filter((s) => s.featured).length,
+      users: realUsers.length,
+      bannedUsers: realUsers.filter((u) => u.banned === true).length,
+      items: items.length,
+      orders: orders.length,
+      revenueCents: revenue,
+      codes: codes.length,
+    };
+  },
+});
+
+/* ----------------------------- announcements ------------------------------ */
+
+// The newest active global announcement. Public — every page shows it.
+export const activeAnnouncement = query({
+  args: {},
+  handler: async (ctx) => {
+    const row = await ctx.db
+      .query("announcements")
+      .withIndex("by_active", (q) => q.eq("active", true))
+      .order("desc")
+      .first();
+    if (!row) return null;
+    return { _id: row._id, text: row.text, createdAt: row.createdAt };
+  },
+});
+
+// All announcements (active + past) for the admin dashboard.
+export const allAnnouncements = query({
+  args: {},
+  handler: async (ctx) => {
+    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    const rows = await ctx.db.query("announcements").collect();
+    return rows.sort((a, b) => b.createdAt - a.createdAt);
+  },
+});
+
+/**
+ * Post a global announcement shown on every page. Posting a new one
+ * automatically retires the previous active announcement.
+ */
+export const postAnnouncement = mutation({
+  args: { text: v.string() },
+  handler: async (ctx, args) => {
+    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    const text = args.text.trim();
+    if (text.length === 0) throw new Error("Announcement cannot be empty");
+    if (text.length > 200)
+      throw new Error("Announcement is too long (max 200)");
+
+    // Retire any currently active announcement.
+    const active = await ctx.db
+      .query("announcements")
+      .withIndex("by_active", (q) => q.eq("active", true))
+      .collect();
+    for (const row of active) await ctx.db.patch(row._id, { active: false });
+
+    await ctx.db.insert("announcements", {
+      text,
+      active: true,
+      createdAt: Date.now(),
+    });
+    return { ok: true as const };
+  },
+});
+
+/** Take an announcement down (keeps it in the history list). */
+export const clearAnnouncement = mutation({
+  args: { announcementId: v.id("announcements") },
+  handler: async (ctx, args) => {
+    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await ctx.db.patch(args.announcementId, { active: false });
+  },
+});
+
+/** Permanently delete a past announcement from the history. */
+export const deleteAnnouncement = mutation({
+  args: { announcementId: v.id("announcements") },
+  handler: async (ctx, args) => {
+    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await ctx.db.delete(args.announcementId);
+  },
+});
+
+/* ------------------------------ shop editing ------------------------------ */
+
+/**
+ * Edit a shop's public info as admin — e.g. fix an inappropriate name or
+ * description without deleting the whole shop.
+ */
+export const adminUpdateShop = mutation({
+  args: {
+    shopId: v.id("shops"),
+    name: v.string(),
+    description: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    const shop = await ctx.db.get(args.shopId);
+    if (!shop) throw new Error("Shop not found");
+
+    const name = args.name.trim();
+    const description = args.description.trim();
+    if (name.length < 2 || name.length > 40)
+      throw new Error("Shop name must be 2-40 characters");
+    if (description.length > 200)
+      throw new Error("Description is too long (max 200)");
+
+    await ctx.db.patch(args.shopId, { name, description });
+  },
+});
+
+/**
+ * Generate a fresh sign-in code for a shop. The old code stops working
+ * immediately — useful if a code was shared too widely.
+ */
+export const adminResetShopCode = mutation({
+  args: { shopId: v.id("shops") },
+  handler: async (ctx, args) => {
+    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    const shop = await ctx.db.get(args.shopId);
+    if (!shop) throw new Error("Shop not found");
+
+    // Remove old codes.
+    const codes = await ctx.db
+      .query("shopCodes")
+      .withIndex("by_shop", (q) => q.eq("shopId", args.shopId))
+      .collect();
+    for (const row of codes) await ctx.db.delete(row._id);
+
+    // Generate a unique new code.
+    const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const bytes = new Uint8Array(8);
+      crypto.getRandomValues(bytes);
+      let code = "";
+      for (let i = 0; i < 8; i += 1) {
+        code += alphabet[bytes[i] % alphabet.length];
+      }
+      const clash = await ctx.db
+        .query("shopCodes")
+        .withIndex("by_code", (q) => q.eq("code", code))
+        .first();
+      if (!clash) {
+        await ctx.db.insert("shopCodes", { code, shopId: args.shopId });
+        return { code };
+      }
+    }
+    throw new Error("Could not generate a unique code — try again");
+  },
+});

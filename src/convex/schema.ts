@@ -77,6 +77,14 @@ const schema = defineSchema(
       sortOrder: v.number(),
     }).index("by_shop", ["shopId"]),
 
+    // Global announcements posted by the site admin. The newest active one
+    // is displayed site-wide on every page.
+    announcements: defineTable({
+      text: v.string(),
+      active: v.boolean(),
+      createdAt: v.number(),
+    }).index("by_active", ["active", "createdAt"]),
+
     // Orders placed by buyers.
     orders: defineTable({
       shopId: v.id("shops"),

@@ -5,6 +5,7 @@ import { LogOut, ShieldCheck, Store } from "lucide-react";
 import { useNavigate, Link } from "react-router";
 import { Button } from "./ui/button";
 import { ColorPicker } from "./ColorPicker";
+import { AnnouncementBanner } from "./AnnouncementBanner";
 
 export function SwissHeader() {
   const { isAuthenticated, signOut } = useAuth();
@@ -21,8 +22,9 @@ export function SwissHeader() {
   const hasShop = myShop !== undefined && myShop !== null;
 
   return (
-    <header className="border-b-2 border-foreground bg-background">
-      <div className="container-swiss flex h-14 items-center justify-between">
+    <>
+      <header className="border-b-2 border-foreground bg-background">
+        <div className="container-swiss flex h-14 items-center justify-between">
         <Link
           to={isAuthenticated ? "/shops" : "/"}
           className="flex items-center gap-3"
@@ -73,7 +75,9 @@ export function SwissHeader() {
           )}
           <ColorPicker />
         </nav>
-      </div>
-    </header>
+        </div>
+      </header>
+      <AnnouncementBanner />
+    </>
   );
 }
