@@ -392,7 +392,7 @@ export default function Admin() {
                               {u.name || u.email || "Guest"}
                             </span>
                             <span className="block truncate text-xs text-muted-foreground">
-                              {u.isAnonymous ? "Guest session" : "Account"}
+                              Account
                               {u.isAdmin ? " · admin" : ""}
                               {u.banned
                                 ? ` · banned${

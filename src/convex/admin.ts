@@ -151,20 +151,22 @@ export const deleteShop = mutation({
 /* --------------------------------- users ---------------------------------- */
 
 // Moderate users: list accounts (with ban state) and ban/unban.
+// Guest (anonymous) sessions are excluded — only real accounts are listed.
 export const allUsers = query({
   args: {},
   handler: async (ctx) => {
     if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
     const users = await ctx.db.query("users").collect();
-    return users.map((u) => ({
-      _id: u._id,
-      name: u.name ?? null,
-      email: u.email ?? null,
-      isAnonymous: u.isAnonymous === true,
-      isAdmin: u.isAdmin === true,
-      banned: u.banned === true,
-      bannedAt: u.bannedAt ?? null,
-    }));
+    return users
+      .filter((u) => u.isAnonymous !== true)
+      .map((u) => ({
+        _id: u._id,
+        name: u.name ?? null,
+        email: u.email ?? null,
+        isAdmin: u.isAdmin === true,
+        banned: u.banned === true,
+        bannedAt: u.bannedAt ?? null,
+      }));
   },
 });
 
