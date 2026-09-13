@@ -20,12 +20,31 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "../convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
-import { Loader2, Minus, Package, Plus, ShoppingBag } from "lucide-react";
+import {
+  ArrowRight,
+  Copy,
+  HandCoins,
+  Loader2,
+  Minus,
+  MessagesSquare,
+  Package,
+  Plus,
+  Repeat,
+  ShoppingBag,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { formatPrice } from "@/lib/shop-format";
 import { resolveShopTheme, shopThemeStyle } from "@/lib/shop-theme";
+
+type StoreItem = {
+  _id: string;
+  name: string;
+  description?: string;
+  emoji?: string | null;
+  priceCents: number | null;
+};
 
 export default function Storefront() {
   const { shopId } = useParams<{ shopId: string }>();
@@ -40,27 +59,29 @@ export default function Storefront() {
     [shop, theme],
   );
 
-  const [dialogItem, setDialogItem] = useState<{
-    _id: string;
-    name: string;
-    emoji?: string | null;
-    priceCents: number;
-  } | null>(null);
+  const [dialogItem, setDialogItem] = useState<StoreItem | null>(null);
   const [buyerName, setBuyerName] = useState("");
   const [period, setPeriod] = useState("");
+  const [offerKind, setOfferKind] = useState<"money" | "trade">("money");
+  const [moneyOffer, setMoneyOffer] = useState("");
+  const [tradeOffer, setTradeOffer] = useState("");
   const [note, setNote] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [submitting, setSubmitting] = useState(false);
 
-  const openOrderDialog = (item: {
-    _id: string;
-    name: string;
-    emoji?: string | null;
-    priceCents: number;
-  }) => {
+  // Post-checkout receipt with the private tracking link.
+  const [receipt, setReceipt] = useState<{
+    itemName: string;
+    trackingUrl: string;
+  } | null>(null);
+
+  const openOrderDialog = (item: StoreItem) => {
     setDialogItem(item);
     setBuyerName("");
     setPeriod("");
+    setOfferKind("money");
+    setMoneyOffer(item.priceCents ? (item.priceCents / 100).toFixed(2) : "");
+    setTradeOffer("");
     setNote("");
     setQuantity(1);
   };
@@ -72,21 +93,51 @@ export default function Storefront() {
 
   const submitOrder = async () => {
     if (!dialogItem || !shopId) return;
+    const moneyCents =
+      offerKind === "money"
+        ? Math.round(parseFloat(moneyOffer || "0") * 100)
+        : undefined;
     setSubmitting(true);
     try {
-      await placeOrder({
+      const result = await placeOrder({
         shopId: shopId as never,
         itemId: dialogItem._id as never,
         quantity,
         buyerName,
         period,
+        offerKind,
+        moneyCents: offerKind === "money" ? moneyCents : undefined,
+        tradeOffer: offerKind === "trade" ? tradeOffer : undefined,
         note: note || undefined,
       });
-      toast.success(`Order placed for ${dialogItem.name}`);
+      const url = `${window.location.origin}/order/${result.trackingToken}`;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        // clipboard may be unavailable — the link is still shown
+      }
+      setReceipt({ itemName: dialogItem.name, trackingUrl: url });
       closeDialog();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to place order");
       setSubmitting(false);
+    }
+  };
+
+  const canSubmit =
+    buyerName.trim().length > 0 &&
+    period.length > 0 &&
+    (offerKind === "money"
+      ? parseFloat(moneyOffer || "0") >= 0 && moneyOffer.trim() !== ""
+      : tradeOffer.trim().length > 0);
+
+  const copyLink = async () => {
+    if (!receipt) return;
+    try {
+      await navigator.clipboard.writeText(receipt.trackingUrl);
+      toast.success("Link copied");
+    } catch {
+      toast.error("Copy failed — select the link and copy manually");
     }
   };
 
@@ -144,9 +195,10 @@ export default function Storefront() {
                   {shop.description}
                 </p>
               )}
-              <p className="mt-5 text-sm text-muted-foreground">
-                Pick an item, choose the period you want it delivered in, and
-                the shop owner will see it instantly.
+              <p className="mt-5 max-w-2xl text-sm leading-6 text-muted-foreground">
+                Pick an item, choose your delivery period, and make an offer —
+                pay with money or propose a trade. The owner can chat with you
+                to work out the details.
               </p>
               <div className="mt-4 flex flex-wrap gap-1.5">
                 {shop.periods.map((p) => (
@@ -199,9 +251,19 @@ export default function Storefront() {
                             {item.name}
                           </h3>
                         </div>
-                        <span className="font-mono-swiss shrink-0 text-lg font-bold text-primary">
-                          {formatPrice(item.priceCents)}
-                        </span>
+                        {item.priceCents !== null && (
+                          <span
+                            className="font-mono-swiss shrink-0 text-right text-xs leading-tight"
+                            title="Suggested amount — offer what you think is fair"
+                          >
+                            <span className="block text-[10px] uppercase tracking-widest text-muted-foreground">
+                              Suggested
+                            </span>
+                            <span className="font-bold text-primary">
+                              {formatPrice(item.priceCents)}
+                            </span>
+                          </span>
+                        )}
                       </div>
                       {item.description && (
                         <p className="mt-1.5 text-sm leading-5 text-muted-foreground">
@@ -215,7 +277,7 @@ export default function Storefront() {
                           style={{ borderRadius: "var(--shop-radius, 0rem)" }}
                         >
                           <ShoppingBag className="size-3.5" />
-                          Order for pickup
+                          Make an offer
                         </Button>
                       </div>
                     </div>
@@ -237,8 +299,8 @@ export default function Storefront() {
               {dialogItem?.name}
             </DialogTitle>
             <DialogDescription>
-              {dialogItem &&
-                `${formatPrice(dialogItem.priceCents)} · pay the owner directly`}
+              Make an offer — pay with money or trade something. The owner can
+              message you to negotiate.
             </DialogDescription>
           </DialogHeader>
 
@@ -301,6 +363,77 @@ export default function Storefront() {
               </div>
             </div>
 
+            {/* Offer picker */}
+            <div>
+              <Label className="grid-label mb-2 block">Your offer</Label>
+              <div className="grid grid-cols-2 gap-px border border-foreground bg-foreground">
+                <button
+                  type="button"
+                  onClick={() => setOfferKind("money")}
+                  className={`flex items-center justify-center gap-2 px-3 py-2.5 text-xs font-bold uppercase tracking-wider ${
+                    offerKind === "money"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-background hover:bg-muted"
+                  }`}
+                >
+                  <HandCoins className="size-4" />
+                  Money
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOfferKind("trade")}
+                  className={`flex items-center justify-center gap-2 px-3 py-2.5 text-xs font-bold uppercase tracking-wider ${
+                    offerKind === "trade"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-background hover:bg-muted"
+                  }`}
+                >
+                  <Repeat className="size-4" />
+                  Trade
+                </button>
+              </div>
+
+              {offerKind === "money" ? (
+                <div className="mt-3">
+                  <Label htmlFor="money-offer" className="grid-label mb-1.5 block">
+                    {dialogItem?.priceCents
+                      ? `Amount (suggested ${formatPrice(dialogItem.priceCents)})`
+                      : "Amount (USD)"}
+                  </Label>
+                  <Input
+                    id="money-offer"
+                    value={moneyOffer}
+                    onChange={(e) =>
+                      setMoneyOffer(e.target.value.replace(/[^0-9.]/g, ""))
+                    }
+                    placeholder={dialogItem?.priceCents
+                      ? (dialogItem.priceCents / 100).toFixed(2)
+                      : "1.50"}
+                    inputMode="decimal"
+                    className="h-11 border-foreground font-mono-swiss"
+                  />
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    Offer what you think is fair — you pay the owner directly.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-3">
+                  <Label htmlFor="trade-offer" className="grid-label mb-1.5 block">
+                    What are you offering?
+                  </Label>
+                  <Textarea
+                    id="trade-offer"
+                    value={tradeOffer}
+                    onChange={(e) => setTradeOffer(e.target.value)}
+                    placeholder="e.g. 2 packs of gum and a Pokémon card"
+                    rows={2}
+                    maxLength={200}
+                    className="resize-none border-foreground"
+                  />
+                </div>
+              )}
+            </div>
+
             <div>
               <Label htmlFor="order-note" className="grid-label mb-2 block">
                 Note to seller (optional)
@@ -319,16 +452,72 @@ export default function Storefront() {
           <DialogFooter>
             <Button
               onClick={submitOrder}
-              disabled={submitting || !buyerName.trim() || !period}
+              disabled={submitting || !canSubmit}
               className="w-full py-6 text-xs font-bold uppercase tracking-wider"
             >
               {submitting ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
-                "Place order"
+                "Send offer"
               )}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Post-checkout receipt with private tracking link */}
+      <Dialog
+        open={receipt !== null}
+        onOpenChange={(open) => !open && setReceipt(null)}
+      >
+        <DialogContent className="border-2 border-foreground sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold uppercase tracking-tight">
+              Offer sent!
+            </DialogTitle>
+            <DialogDescription>
+              {receipt && (
+                <>
+                  Your offer for {receipt.itemName} is with the shop owner.
+                  They can accept, counter, or chat with you to negotiate.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          {receipt && (
+            <div className="space-y-4">
+              <div className="border-2 border-foreground bg-muted p-3">
+                <span className="grid-label mb-1.5 block">
+                  Your private order link — save this
+                </span>
+                <p className="break-all font-mono-swiss text-xs leading-5">
+                  {receipt.trackingUrl}
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Open it to track your order status and chat with the owner.
+                  Anyone with this link can see the order, so keep it private.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button
+                  variant="outline"
+                  onClick={copyLink}
+                  className="gap-2 border-foreground"
+                >
+                  <Copy className="size-4" />
+                  Copy link
+                </Button>
+                <Button asChild className="gap-2">
+                  <a href={receipt.trackingUrl} target="_blank" rel="noreferrer">
+                    <MessagesSquare className="size-4" />
+                    Open order & chat
+                    <ArrowRight className="size-4" />
+                  </a>
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

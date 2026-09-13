@@ -361,7 +361,7 @@ export const publicShop = query({
           name: i.name,
           description: i.description,
           emoji: i.emoji ?? null,
-          priceCents: i.priceCents,
+          priceCents: i.priceCents ?? null,
         })),
     };
   },
@@ -388,7 +388,7 @@ export const saveItem = mutation({
     name: v.string(),
     description: v.optional(v.string()),
     emoji: v.optional(v.string()),
-    priceCents: v.number(),
+    priceCents: v.optional(v.number()), // suggested price, optional
     available: v.boolean(),
   },
   handler: async (ctx, args) => {
@@ -400,10 +400,13 @@ export const saveItem = mutation({
     const description = args.description?.trim() || undefined;
     if (description && description.length > 200)
       throw new Error("Item description is too long (max 200)");
-    if (!Number.isFinite(args.priceCents) || args.priceCents < 0)
-      throw new Error("Price must be zero or more");
-    if (args.priceCents > 100000000)
-      throw new Error("Price is too large");
+    const priceCents =
+      args.priceCents === undefined ? undefined : Math.round(args.priceCents);
+    if (priceCents !== undefined) {
+      if (!Number.isFinite(priceCents) || priceCents < 0)
+        throw new Error("Price must be zero or more");
+      if (priceCents > 100000000) throw new Error("Price is too large");
+    }
     const emoji = args.emoji?.trim() || undefined;
     if (emoji && Array.from(emoji).length > 4)
       throw new Error("Emoji is too long");
@@ -416,7 +419,7 @@ export const saveItem = mutation({
         name,
         description,
         emoji,
-        priceCents: Math.round(args.priceCents),
+        priceCents,
         available: args.available,
       });
       return args.itemId;
@@ -432,7 +435,7 @@ export const saveItem = mutation({
       name,
       description,
       emoji,
-      priceCents: Math.round(args.priceCents),
+      priceCents,
       available: args.available,
       sortOrder: maxOrder + 1,
     });
@@ -451,6 +454,16 @@ export const deleteItem = mutation({
 
 /* ---------------------------------- orders --------------------------------- */
 
+const randomToken = (length: number) => {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  let out = "";
+  for (let i = 0; i < length; i += 1) {
+    out += ALPHABET[bytes[i] % ALPHABET.length];
+  }
+  return out;
+};
+
 export const placeOrder = mutation({
   args: {
     shopId: v.id("shops"),
@@ -458,6 +471,9 @@ export const placeOrder = mutation({
     quantity: v.number(),
     buyerName: v.string(),
     period: v.string(),
+    offerKind: v.union(v.literal("money"), v.literal("trade")),
+    moneyCents: v.optional(v.number()),
+    tradeOffer: v.optional(v.string()),
     note: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -477,6 +493,7 @@ export const placeOrder = mutation({
     const buyerName = args.buyerName.trim();
     const period = args.period.trim();
     const note = args.note?.trim() || undefined;
+    const tradeOffer = args.tradeOffer?.trim() || undefined;
     if (buyerName.length < 1) throw new Error("Your name is required");
     if (buyerName.length > 60) throw new Error("Name is too long (max 60)");
     const allowedPeriods = shop.periods ?? DEFAULT_PERIODS;
@@ -487,18 +504,183 @@ export const placeOrder = mutation({
     if (!Number.isInteger(args.quantity) || args.quantity < 1 || args.quantity > 20)
       throw new Error("Quantity must be between 1 and 20");
 
-    await ctx.db.insert("orders", {
+    // Validate the offer: money or trade, exactly one.
+    let moneyCents: number | undefined;
+    if (args.offerKind === "money") {
+      moneyCents = args.moneyCents;
+      if (
+        moneyCents === undefined ||
+        !Number.isFinite(moneyCents) ||
+        moneyCents < 0 ||
+        moneyCents > 100000000
+      )
+        throw new Error("Enter a valid money offer");
+    } else {
+      if (!tradeOffer) throw new Error("Describe what you're offering to trade");
+      if (tradeOffer.length > 200)
+        throw new Error("Trade offer is too long (max 200)");
+    }
+
+    const trackingToken = randomToken(24);
+    const orderId = await ctx.db.insert("orders", {
       shopId: args.shopId,
       itemId: args.itemId,
       itemName: item.name,
-      priceCents: item.priceCents,
       quantity: args.quantity,
       buyerName,
       period,
+      offerKind: args.offerKind,
+      moneyCents,
+      tradeOffer,
       note,
       status: "new",
+      trackingToken,
       createdAt: Date.now(),
     });
+    return { orderId, trackingToken };
+  },
+});
+
+/* ------------------------------ order tracking ----------------------------- */
+
+// Buyer-side order lookup by secret token. Returns the order plus the shop
+// name so the tracking page can render without any account.
+export const orderByToken = query({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    const order = await ctx.db
+      .query("orders")
+      .withIndex("by_token", (q) => q.eq("trackingToken", args.token))
+      .first();
+    if (!order) return null;
+    const shop = await ctx.db.get(order.shopId);
+    return {
+      _id: order._id,
+      shopId: order.shopId,
+      shopName: shop?.name ?? "Shop",
+      shopEmoji: shop?.theme?.emoji ?? "🏪",
+      itemName: order.itemName,
+      quantity: order.quantity,
+      buyerName: order.buyerName,
+      period: order.period,
+      offerKind: order.offerKind,
+      moneyCents: order.moneyCents ?? null,
+      tradeOffer: order.tradeOffer ?? null,
+      status: order.status,
+      createdAt: order.createdAt,
+      lastMessageAt: order.lastMessageAt ?? null,
+    };
+  },
+});
+
+/* -------------------------------- order chat ------------------------------- */
+
+// Chat history for an order. Readable by the shop (owner/code session) or by
+// the buyer holding the secret tracking token.
+export const orderMessages = query({
+  args: { orderId: v.id("orders"), token: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const order = await ctx.db.get(args.orderId);
+    if (!order) return [];
+
+    let allowed = false;
+    if (args.token !== undefined && args.token === order.trackingToken) {
+      allowed = true;
+    } else {
+      const userId = await getAuthUserId(ctx);
+      if (userId !== null) {
+        if (order.shopId) {
+          try {
+            await assertShopAccess(ctx, order.shopId);
+            allowed = true;
+          } catch {
+            allowed = false;
+          }
+        }
+      }
+    }
+    if (!allowed) return [];
+
+    const messages = await ctx.db
+      .query("orderMessages")
+      .withIndex("by_order", (q) => q.eq("orderId", args.orderId))
+      .collect();
+    return messages.sort((a, b) => a.createdAt - b.createdAt);
+  },
+});
+
+// Send a chat message as the shop owner (or a staff code session).
+export const sendOwnerMessage = mutation({
+  args: { orderId: v.id("orders"), text: v.string() },
+  handler: async (ctx, args) => {
+    const order = await ctx.db.get(args.orderId);
+    if (!order) throw new Error("Order not found");
+    await assertShopAccess(ctx, order.shopId);
+
+    const text = args.text.trim();
+    if (text.length === 0) throw new Error("Message cannot be empty");
+    if (text.length > 500) throw new Error("Message is too long (max 500)");
+
+    await ctx.db.insert("orderMessages", {
+      orderId: args.orderId,
+      from: "owner",
+      text,
+      createdAt: Date.now(),
+    });
+    await ctx.db.patch(args.orderId, { lastMessageAt: Date.now() });
+  },
+});
+
+// Send a chat message as the buyer — requires the secret tracking token that
+// only the buyer received at checkout.
+export const sendBuyerMessage = mutation({
+  args: { orderId: v.id("orders"), token: v.string(), text: v.string() },
+  handler: async (ctx, args) => {
+    const order = await ctx.db.get(args.orderId);
+    if (!order) throw new Error("Order not found");
+    if (args.token !== order.trackingToken)
+      throw new Error("Invalid order link");
+
+    const text = args.text.trim();
+    if (text.length === 0) throw new Error("Message cannot be empty");
+    if (text.length > 500) throw new Error("Message is too long (max 500)");
+
+    await ctx.db.insert("orderMessages", {
+      orderId: args.orderId,
+      from: "buyer",
+      text,
+      createdAt: Date.now(),
+    });
+    await ctx.db.patch(args.orderId, { lastMessageAt: Date.now() });
+  },
+});
+
+// Count of orders with unread buyer replies, for the dashboard badge.
+export const unreadChatCount = query({
+  args: { shopId: v.id("shops") },
+  handler: async (ctx, args) => {
+    await assertShopAccess(ctx, args.shopId);
+    const orders = await ctx.db
+      .query("orders")
+      .withIndex("by_shop", (q) => q.eq("shopId", args.shopId))
+      .collect();
+    let count = 0;
+    for (const order of orders) {
+      if (order.lastMessageAt === undefined) continue;
+      // Any buyer message newer than the last owner message counts as unread.
+      const messages = await ctx.db
+        .query("orderMessages")
+        .withIndex("by_order", (q) => q.eq("orderId", order._id))
+        .collect();
+      const lastOwner = messages
+        .filter((m) => m.from === "owner")
+        .reduce((m, msg) => Math.max(m, msg.createdAt), 0);
+      const lastBuyer = messages
+        .filter((m) => m.from === "buyer")
+        .reduce((m, msg) => Math.max(m, msg.createdAt), 0);
+      if (lastBuyer > lastOwner) count += 1;
+    }
+    return count;
   },
 });
 

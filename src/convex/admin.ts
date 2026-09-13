@@ -121,7 +121,14 @@ export const deleteShop = mutation({
       .query("orders")
       .withIndex("by_shop", (q) => q.eq("shopId", args.shopId))
       .collect();
-    for (const order of orders) await ctx.db.delete(order._id);
+    for (const order of orders) {
+      const messages = await ctx.db
+        .query("orderMessages")
+        .withIndex("by_order", (q) => q.eq("orderId", order._id))
+        .collect();
+      for (const message of messages) await ctx.db.delete(message._id);
+      await ctx.db.delete(order._id);
+    }
 
     // Delete every item.
     const items = await ctx.db
@@ -266,10 +273,11 @@ export const siteStats = query({
     ]);
 
     const realUsers = users.filter((u) => u.isAnonymous !== true);
-    const revenue = orders.reduce(
-      (sum, o) => sum + o.priceCents * o.quantity,
+    const moneyOffers = orders.reduce(
+      (sum, o) => sum + (o.moneyCents ?? 0) * o.quantity,
       0,
     );
+    const trades = orders.filter((o) => o.offerKind === "trade").length;
 
     return {
       shops: shops.length,
@@ -278,7 +286,8 @@ export const siteStats = query({
       bannedUsers: realUsers.filter((u) => u.banned === true).length,
       items: items.length,
       orders: orders.length,
-      revenueCents: revenue,
+      moneyOfferCents: moneyOffers,
+      tradeOffers: trades,
       codes: codes.length,
     };
   },

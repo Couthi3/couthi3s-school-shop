@@ -1,4 +1,11 @@
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -15,10 +22,13 @@ import {
   CircleDashed,
   Copy,
   Eye,
+  HandCoins,
   Loader2,
+  MessageCircle,
   Package,
   Palette,
   Plus,
+  Repeat,
   RotateCcw,
   Save,
   Sparkles,
@@ -27,6 +37,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
+import { OrderChat } from "@/components/OrderChat";
 import { PICKUP_PERIODS, formatPrice, formatTime, statusColor } from "@/lib/shop-format";
 import {
   ITEM_EMOJI_CHOICES,
@@ -50,7 +61,6 @@ type ItemDraft = {
   saving: boolean;
   dirty: boolean;
 };
-
 const emptyDraft = (): ItemDraft => ({
   key: Math.random().toString(36).slice(2),
   itemId: null,
@@ -93,6 +103,10 @@ export default function ManageShop() {
   const saveProfile = useMutation(api.shops.saveShopProfile);
   const savePeriods = useMutation(api.shops.saveShopPeriods);
   const saveTheme = useMutation(api.shops.saveShopTheme);
+  const unreadChat = useQuery(
+    api.shops.unreadChatCount,
+    shopId ? { shopId } : "skip",
+  );
 
   const [drafts, setDrafts] = useState<ItemDraft[]>([emptyDraft()]);
   const [savingAll, setSavingAll] = useState(false);
@@ -103,6 +117,7 @@ export default function ManageShop() {
   const [savingPeriods, setSavingPeriods] = useState(false);
   const [themeDraft, setThemeDraft] = useState<ShopTheme | null>(null);
   const [savingTheme, setSavingTheme] = useState(false);
+  const [chatOrderId, setChatOrderId] = useState<string | null>(null);
 
   // Seed drafts from server items once they load.
   useEffect(() => {
@@ -114,7 +129,7 @@ export default function ManageShop() {
         name: i.name,
         description: i.description ?? "",
         emoji: i.emoji ?? "",
-        price: (i.priceCents / 100).toFixed(2),
+        price: i.priceCents != null ? (i.priceCents / 100).toFixed(2) : "",
         available: i.available,
         saving: false,
         dirty: false,
@@ -139,12 +154,15 @@ export default function ManageShop() {
 
   const persistDraft = async (draft: ItemDraft) => {
     if (!shopId) return;
-    const cents = Math.round(parseFloat(draft.price || "0") * 100);
+    const priceCents =
+      draft.price.trim() === ""
+        ? undefined
+        : Math.round(parseFloat(draft.price || "0") * 100);
     if (!draft.name.trim()) {
       toast.error("Item name is required");
       return;
     }
-    if (Number.isNaN(cents) || cents < 0) {
+    if (priceCents !== undefined && (Number.isNaN(priceCents) || priceCents < 0)) {
       toast.error(`“${draft.name || "Item"}” has an invalid price`);
       return;
     }
@@ -156,7 +174,7 @@ export default function ManageShop() {
         name: draft.name,
         description: draft.description || undefined,
         emoji: draft.emoji || undefined,
-        priceCents: cents,
+        priceCents,
         available: draft.available,
       });
       setDrafts((ds) =>
@@ -374,6 +392,15 @@ export default function ManageShop() {
                   {newOrders}
                 </span>
               )}
+              {(unreadChat ?? 0) > 0 && (
+                <span
+                  className="ml-1.5 inline-flex items-center gap-1 bg-[var(--swiss-blue)] px-1.5 py-0.5 text-[10px] font-bold text-background"
+                  title="Orders with new buyer messages"
+                >
+                  <MessageCircle className="size-3" />
+                  {unreadChat}
+                </span>
+              )}
             </TabsTrigger>
             <TabsTrigger
               value="items"
@@ -427,15 +454,41 @@ export default function ManageShop() {
                       <span className="font-bold uppercase">
                         {order.quantity}× {order.itemName}
                       </span>
-                      <span className="ml-2 font-mono-swiss text-sm text-primary">
-                        {formatPrice(order.priceCents * order.quantity)}
-                      </span>
                     </div>
                     <div className="text-sm">
                       {order.buyerName}
                       <span className="ml-2 inline-block bg-[var(--swiss-blue)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-background">
                         {order.period}
                       </span>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                        {order.offerKind === "money" ? (
+                          <span className="inline-flex items-center gap-1.5 border-2 border-foreground px-2 py-0.5 text-xs font-bold">
+                            <HandCoins className="size-3.5 text-primary" />
+                            {order.moneyCents != null
+                              ? formatPrice(order.moneyCents)
+                              : "—"}
+                            <span className="text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
+                              {order.quantity > 1 ? "each" : "offered"}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 border-2 border-foreground px-2 py-0.5 text-xs font-bold">
+                            <Repeat className="size-3.5 text-primary" />
+                            {order.tradeOffer}
+                          </span>
+                        )}
+                        {order.status !== "delivered" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 border-foreground"
+                            onClick={() => setChatOrderId(order._id)}
+                          >
+                            <MessageCircle className="size-3.5" />
+                            Chat
+                          </Button>
+                        )}
+                      </div>
                       {order.note && (
                         <p className="mt-1 text-xs italic text-muted-foreground">
                           “{order.note}”
@@ -575,7 +628,7 @@ export default function ManageShop() {
                         </div>
                         <div>
                           <Label className="grid-label mb-1.5 block">
-                            Price (USD)
+                            Suggested price (USD, optional)
                           </Label>
                           <Input
                             value={draft.price}
@@ -584,10 +637,14 @@ export default function ManageShop() {
                                 price: e.target.value.replace(/[^0-9.]/g, ""),
                               })
                             }
-                            placeholder="1.50"
+                            placeholder="Buyers choose — e.g. 1.50"
                             inputMode="decimal"
                             className="h-10 border-foreground"
                           />
+                          <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                            Buyers can pay this or offer their own amount / a
+                            trade.
+                          </p>
                         </div>
                       </div>
                       <div className="mt-3">
@@ -679,7 +736,7 @@ export default function ManageShop() {
                                     parseFloat(d.price || "0") * 100,
                                   ),
                                 )
-                              : "—"}
+                              : "Your pick"}
                           </span>
                         </div>
                       ))}
@@ -1182,7 +1239,7 @@ export default function ManageShop() {
                                         parseFloat(d.price || "0") * 100,
                                       ),
                                     )
-                                  : "—"}
+                                  : "Your pick"}
                               </span>
                             </div>
                           ))}
@@ -1211,6 +1268,27 @@ export default function ManageShop() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Order negotiation chat dialog */}
+      <Dialog open={chatOrderId !== null} onOpenChange={(open) => !open && setChatOrderId(null)}>
+        <DialogContent className="border-2 border-foreground sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold uppercase tracking-tight">
+              Negotiate with buyer
+            </DialogTitle>
+            <DialogDescription>
+              Discuss the offer, counter, and settle the details. The buyer
+              replies from their private order link.
+            </DialogDescription>
+          </DialogHeader>
+          {chatOrderId && (
+            <OrderChat
+              orderId={chatOrderId}
+              role="owner"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

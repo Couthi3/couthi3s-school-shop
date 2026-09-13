@@ -342,8 +342,8 @@ export default function Admin() {
               {stats === undefined
                 ? "Loading stats…"
                 : `${stats.featuredShops} pinned · ${stats.bannedUsers} banned accounts · $${(
-                    stats.revenueCents / 100
-                  ).toFixed(2)} total order volume`}
+                    stats.moneyOfferCents / 100
+                  ).toFixed(2)} money offered · ${stats.tradeOffers} trade${stats.tradeOffers === 1 ? "" : "s"}`}
             </p>
 
             {/* Global announcements */}

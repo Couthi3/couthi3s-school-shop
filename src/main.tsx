@@ -68,6 +68,7 @@ const CreateShop = lazy(() => import("./pages/CreateShop.tsx"));
 const ShopSignIn = lazy(() => import("./pages/ShopSignIn.tsx"));
 const Storefront = lazy(() => import("./pages/Storefront.tsx"));
 const ManageShop = lazy(() => import("./pages/ManageShop.tsx"));
+const OrderTracking = lazy(() => import("./pages/OrderTracking.tsx"));
 const Admin = lazy(() => import("./pages/Admin.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
@@ -140,6 +141,7 @@ createRoot(document.getElementById("root")!).render(
                 }
               />
               <Route path="/shop/:shopId" element={<Storefront />} />
+              <Route path="/order/:token" element={<OrderTracking />} />
               <Route
                 path="/manage"
                 element={

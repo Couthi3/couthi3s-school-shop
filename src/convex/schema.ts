@@ -67,12 +67,14 @@ const schema = defineSchema(
     }).index("by_session", ["sessionId"]),
 
     // Items for sale in a shop.
+    // Items for sale in a shop. Prices are suggested amounts — buyers pay
+    // whatever they offer (money) or propose a trade.
     items: defineTable({
       shopId: v.id("shops"),
       name: v.string(),
       description: v.optional(v.string()),
       emoji: v.optional(v.string()), // per-item emoji chosen by the owner
-      priceCents: v.number(),
+      priceCents: v.optional(v.number()), // suggested price, optional
       available: v.boolean(),
       sortOrder: v.number(),
     }).index("by_shop", ["shopId"]),
@@ -87,25 +89,38 @@ const schema = defineSchema(
       createdAt: v.number(),
     }).index("by_active", ["active", "createdAt"]),
 
-    // Orders placed by buyers.
+    // Orders placed by buyers. The buyer offers either money or a trade.
     orders: defineTable({
       shopId: v.id("shops"),
       itemId: v.id("items"),
       itemName: v.string(), // denormalized snapshot
-      priceCents: v.number(), // price at time of order
       quantity: v.number(),
       buyerName: v.string(),
       period: v.string(), // pickup period, e.g. "Period 4"
+      offerKind: v.union(v.literal("money"), v.literal("trade")),
+      moneyCents: v.optional(v.number()), // set when offerKind = money
+      tradeOffer: v.optional(v.string()), // set when offerKind = trade
       note: v.optional(v.string()),
       status: v.union(
         v.literal("new"),
         v.literal("ready"),
         v.literal("delivered"),
       ),
+      trackingToken: v.string(), // secret token so the buyer can view order + chat
+      lastMessageAt: v.optional(v.number()), // bumped on chat activity
       createdAt: v.number(),
     })
       .index("by_shop", ["shopId"])
-      .index("by_item", ["itemId"]),
+      .index("by_item", ["itemId"])
+      .index("by_token", ["trackingToken"]),
+
+    // Negotiation chat between shop owner and buyer, attached to an order.
+    orderMessages: defineTable({
+      orderId: v.id("orders"),
+      from: v.union(v.literal("owner"), v.literal("buyer")),
+      text: v.string(),
+      createdAt: v.number(),
+    }).index("by_order", ["orderId"]),
   },
   {
     schemaValidation: false,
