@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { SwissHeader } from "@/components/SwissHeader";
@@ -29,6 +30,7 @@ import {
   ArrowDown,
   ArrowUp,
   Ban,
+  Check,
   KeyRound,
   Loader2,
   LogOut,
@@ -41,8 +43,9 @@ import {
   Trash2,
   User,
   UserCheck,
+  UserPlus,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 
@@ -74,6 +77,19 @@ export default function Admin() {
   const adminUpdateShop = useMutation(api.admin.adminUpdateShop);
   const adminResetShopCode = useMutation(api.admin.adminResetShopCode);
 
+  // Tickets & team management
+  const tickets = useQuery(
+    api.support.allTickets,
+    adminState?.isAdmin ? {} : "skip",
+  );
+  const updateTicket = useMutation(api.support.updateTicket);
+  const deleteTicket = useMutation(api.support.deleteTicket);
+  const teamMembers = useQuery(api.team.teamMembers);
+  const addTeamMember = useMutation(api.team.addTeamMember);
+  const updateTeamMember = useMutation(api.team.updateTeamMember);
+  const removeTeamMember = useMutation(api.team.removeTeamMember);
+  const moveTeamMember = useMutation(api.team.moveTeamMember);
+
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [signingIn, setSigningIn] = useState(false);
@@ -88,6 +104,83 @@ export default function Admin() {
   // Edit-shop dialog
   const [editShop, setEditShop] = useState<{ id: string; name: string; description: string } | null>(null);
   const [savingShop, setSavingShop] = useState(false);
+
+  // Team management dialog state
+  const [teamDialog, setTeamDialog] = useState<{
+    id: string | null; // null = adding new
+    name: string;
+    rank: string;
+    tagline: string;
+    emoji: string;
+  } | null>(null);
+  const [savingTeam, setSavingTeam] = useState(false);
+
+  const saveTeamMember = async () => {
+    if (!teamDialog) return;
+    setSavingTeam(true);
+    try {
+      if (teamDialog.id) {
+        await updateTeamMember({
+          memberId: teamDialog.id as never,
+          name: teamDialog.name,
+          rank: teamDialog.rank,
+          tagline: teamDialog.tagline || undefined,
+          emoji: teamDialog.emoji || undefined,
+        });
+        toast.success("Team member updated");
+      } else {
+        await addTeamMember({
+          name: teamDialog.name,
+          rank: teamDialog.rank,
+          tagline: teamDialog.tagline || undefined,
+          emoji: teamDialog.emoji || undefined,
+        });
+        toast.success("Added to the team");
+      }
+      setTeamDialog(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setSavingTeam(false);
+    }
+  };
+
+  const moveTeam = async (memberId: string, direction: "up" | "down") => {
+    try {
+      await moveTeamMember({ memberId: memberId as never, direction });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  };
+
+  const handleTicketStatus = async (
+    ticketId: string,
+    status: "open" | "in_progress" | "resolved",
+  ) => {
+    try {
+      await updateTicket({ ticketId: ticketId as never, status });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  };
+
+  const handleTicketNote = async (ticketId: string, note: string) => {
+    try {
+      await updateTicket({ ticketId: ticketId as never, adminNote: note });
+      toast.success("Reply saved — the submitter sees it on their ticket");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  };
+
+  const handleTicketDelete = async (ticketId: string) => {
+    try {
+      await deleteTicket({ ticketId: ticketId as never });
+      toast.success("Ticket deleted");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  };
 
   const handlePostAnnouncement = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -737,6 +830,210 @@ export default function Admin() {
                   )}
                 </section>
 
+                {/* Tickets */}
+                <section className="mt-12">
+                  <h2 className="mb-5 text-xl font-bold uppercase">
+                    Tickets
+                    <span className="ml-2 font-mono-swiss text-sm text-muted-foreground">
+                      {tickets?.length ?? 0}
+                    </span>
+                  </h2>
+                  {tickets === undefined ? (
+                    <div className="py-6 text-center">
+                      <Loader2 className="mx-auto size-5 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : tickets.length === 0 ? (
+                    <div className="border-2 border-dashed border-foreground p-8 text-center text-sm text-muted-foreground">
+                      No tickets yet — issues, suggestions and staff
+                      applications from /tickets appear here.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {tickets.map((t) => (
+                        <div key={t._id} className="border-2 border-foreground p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <span className="block truncate text-sm font-bold uppercase">
+                                {t.title}
+                              </span>
+                              <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                {t.category.replace("_", " ")} ·{" "}
+                                {t.contact || "guest"} ·{" "}
+                                {new Date(t.createdAt).toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                                  t.status === "open"
+                                    ? "bg-[var(--swiss-red)] text-white"
+                                    : t.status === "in_progress"
+                                      ? "bg-[var(--swiss-blue)] text-white"
+                                      : "bg-foreground text-background"
+                                }`}
+                              >
+                                {t.status.replace("_", " ")}
+                              </span>
+                              {t.status === "open" && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-foreground"
+                                  onClick={() => handleTicketStatus(t._id, "in_progress")}
+                                >
+                                  Start
+                                </Button>
+                              )}
+                              {t.status !== "resolved" && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-foreground"
+                                  onClick={() => handleTicketStatus(t._id, "resolved")}
+                                >
+                                  Resolve
+                                </Button>
+                              )}
+                              {t.status !== "open" && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleTicketStatus(t._id, "open")}
+                                >
+                                  Reopen
+                                </Button>
+                              )}
+                              <Button
+                                size="icon-sm"
+                                variant="ghost"
+                                title="Delete ticket"
+                                onClick={() => handleTicketDelete(t._id)}
+                              >
+                                <Trash2 className="size-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                          <p className="mt-2 whitespace-pre-wrap border-l-4 border-border pl-3 text-sm leading-5 text-muted-foreground">
+                            {t.body}
+                          </p>
+                          <TicketReply
+                            initial={t.adminNote ?? ""}
+                            onSave={(note) => handleTicketNote(t._id, note)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {/* Team roster management */}
+                <section className="mt-12">
+                  <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="text-xl font-bold uppercase">
+                      Meet the Team
+                      <span className="ml-2 font-mono-swiss text-sm text-muted-foreground">
+                        {teamMembers?.length ?? 0}
+                      </span>
+                    </h2>
+                    <Button
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() =>
+                        setTeamDialog({ id: null, name: "", rank: "", tagline: "", emoji: "" })
+                      }
+                    >
+                      <UserPlus className="size-3.5" />
+                      Add member
+                    </Button>
+                  </div>
+                  <p className="mb-4 max-w-xl text-xs leading-4 text-muted-foreground">
+                    This roster is public at /team — order it by rank
+                    (highest first). Students can apply via a staff ticket.
+                  </p>
+                  {teamMembers === undefined ? (
+                    <div className="py-6 text-center">
+                      <Loader2 className="mx-auto size-5 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : teamMembers.length === 0 ? (
+                    <div className="border-2 border-dashed border-foreground p-8 text-center text-sm text-muted-foreground">
+                      No team members yet — add yourself first.
+                    </div>
+                  ) : (
+                    <div className="border-2 border-foreground">
+                      {teamMembers.map((m, idx) => (
+                        <div
+                          key={m._id}
+                          className="flex flex-wrap items-center gap-3 border-b border-border px-5 py-3.5 last:border-b-0"
+                        >
+                          <span className="font-mono-swiss w-8 text-lg font-bold text-primary">
+                            {String(idx + 1).padStart(2, "0")}
+                          </span>
+                          <span className="text-xl" aria-hidden>
+                            {m.emoji || ""}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <span className="block truncate font-bold uppercase">
+                              {m.name}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {m.rank}
+                              {m.tagline ? ` — ${m.tagline}` : ""}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              size="icon-sm"
+                              variant="outline"
+                              className="border-foreground"
+                              disabled={idx === 0}
+                              title="Move up (higher rank)"
+                              onClick={() => moveTeam(m._id, "up")}
+                            >
+                              <ArrowUp className="size-3.5" />
+                            </Button>
+                            <Button
+                              size="icon-sm"
+                              variant="outline"
+                              className="border-foreground"
+                              disabled={idx === (teamMembers?.length ?? 0) - 1}
+                              title="Move down (lower rank)"
+                              onClick={() => moveTeam(m._id, "down")}
+                            >
+                              <ArrowDown className="size-3.5" />
+                            </Button>
+                            <Button
+                              size="icon-sm"
+                              variant="outline"
+                              className="border-foreground"
+                              title="Edit member"
+                              onClick={() =>
+                                setTeamDialog({
+                                  id: m._id,
+                                  name: m.name,
+                                  rank: m.rank,
+                                  tagline: m.tagline ?? "",
+                                  emoji: m.emoji ?? "",
+                                })
+                              }
+                            >
+                              <Pencil className="size-3.5" />
+                            </Button>
+                            <Button
+                              size="icon-sm"
+                              variant="outline"
+                              className="border-destructive text-destructive"
+                              title="Remove from team"
+                              onClick={() => removeTeamMember({ memberId: m._id as never })}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
                 {/* Edit shop dialog */}
                 <Dialog
                   open={editShop !== null}
@@ -883,6 +1180,148 @@ export default function Admin() {
           </div>
         )}
       </div>
+
+      {/* Team member add/edit dialog */}
+      <Dialog
+        open={teamDialog !== null}
+        onOpenChange={(open) => !open && setTeamDialog(null)}
+      >
+        <DialogContent className="border-2 border-foreground sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-bold uppercase tracking-tight">
+              {teamDialog?.id ? "Edit team member" : "Add team member"}
+            </DialogTitle>
+            <DialogDescription>
+              Shown publicly on the Meet The Team page. Order the list by rank,
+              highest first.
+            </DialogDescription>
+          </DialogHeader>
+          {teamDialog && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-[1fr_2rem] gap-2">
+                <div>
+                  <Label htmlFor="team-name" className="grid-label mb-1.5 block">
+                    Name
+                  </Label>
+                  <Input
+                    id="team-name"
+                    value={teamDialog.name}
+                    onChange={(e) =>
+                      setTeamDialog({ ...teamDialog, name: e.target.value })
+                    }
+                    maxLength={40}
+                    className="h-11 border-foreground"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="team-emoji" className="grid-label mb-1.5 block">
+                    Icon
+                  </Label>
+                  <Input
+                    id="team-emoji"
+                    value={teamDialog.emoji}
+                    onChange={(e) =>
+                      setTeamDialog({ ...teamDialog, emoji: e.target.value })
+                    }
+                    placeholder="👑"
+                    maxLength={4}
+                    className="h-11 border-foreground text-center text-lg"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="team-rank" className="grid-label mb-1.5 block">
+                  Rank
+                </Label>
+                <Input
+                  id="team-rank"
+                  value={teamDialog.rank}
+                  onChange={(e) =>
+                    setTeamDialog({ ...teamDialog, rank: e.target.value })
+                  }
+                  placeholder="Owner, Admin, Moderator, Helper…"
+                  maxLength={30}
+                  className="h-11 border-foreground"
+                />
+              </div>
+              <div>
+                <Label htmlFor="team-tagline" className="grid-label mb-1.5 block">
+                  Tagline (optional)
+                </Label>
+                <Input
+                  id="team-tagline"
+                  value={teamDialog.tagline}
+                  onChange={(e) =>
+                    setTeamDialog({ ...teamDialog, tagline: e.target.value })
+                  }
+                  placeholder="Runs the site and keeps shops in line"
+                  maxLength={100}
+                  className="h-11 border-foreground"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setTeamDialog(null)}
+              className="border-foreground"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={saveTeamMember}
+              disabled={
+                savingTeam ||
+                !teamDialog ||
+                teamDialog.name.trim().length < 1 ||
+                teamDialog.rank.trim().length < 1
+              }
+            >
+              {savingTeam && <Loader2 className="size-4 animate-spin" />}
+              {teamDialog?.id ? "Save changes" : "Add member"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/** Inline admin-reply editor shown under each ticket. */
+function TicketReply({
+  initial,
+  onSave,
+}: {
+  initial: string;
+  onSave: (note: string) => void;
+}) {
+  const [note, setNote] = useState(initial);
+  const inputId = useId();
+  const dirty = note.trim() !== initial;
+  return (
+    <div className="mt-3">
+      <Label htmlFor={inputId} className="grid-label mb-1.5 block">
+        Admin reply (visible to the submitter)
+      </Label>
+      <Textarea
+        id={inputId}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Write a reply…"
+        rows={2}
+        maxLength={500}
+        className="resize-none border-foreground"
+      />
+      <Button
+        size="sm"
+        className="mt-2 gap-1.5"
+        disabled={!dirty || note.trim().length === 0}
+        onClick={() => onSave(note.trim())}
+      >
+        <Check className="size-3.5" />
+        Save reply
+      </Button>
     </div>
   );
 }

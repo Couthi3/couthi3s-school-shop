@@ -1,7 +1,7 @@
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { LogOut, ShieldCheck, Store } from "lucide-react";
+import { LifeBuoy, LogOut, ShieldCheck, Store, Users } from "lucide-react";
 import { useNavigate, Link } from "react-router";
 import { Button } from "./ui/button";
 import { ColorPicker } from "./ColorPicker";
@@ -38,6 +38,21 @@ export function SwissHeader() {
         </Link>
 
         <nav className="flex items-center gap-1">
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/shops">Shops</Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/team" className="gap-1.5">
+              <Users className="size-3.5" />
+              Team
+            </Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/tickets" className="gap-1.5">
+              <LifeBuoy className="size-3.5" />
+              Feedback
+            </Link>
+          </Button>
           {isAuthenticated && hasShop && (
             <Button asChild variant="ghost" size="sm">
               <Link to="/manage">My Shop</Link>

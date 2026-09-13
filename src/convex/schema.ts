@@ -121,6 +121,36 @@ const schema = defineSchema(
       text: v.string(),
       createdAt: v.number(),
     }).index("by_order", ["orderId"]),
+
+    // Support tickets: bug reports, suggestions, and staff applications.
+    // Submitters are optional users (guests can file tickets too).
+    tickets: defineTable({
+      category: v.union(
+        v.literal("issue"),
+        v.literal("suggestion"),
+        v.literal("staff"),
+      ),
+      title: v.string(),
+      body: v.string(),
+      contact: v.optional(v.string()), // guest contact, e.g. a username or name
+      userId: v.optional(v.id("users")), // set when a signed-in user submits
+      status: v.union(
+        v.literal("open"),
+        v.literal("in_progress"),
+        v.literal("resolved"),
+      ),
+      adminNote: v.optional(v.string()), // private reply from the site admin
+      createdAt: v.number(),
+    }).index("by_status", ["status"]),
+
+    // Public "Meet the team" roster, managed by the site admin.
+    teamMembers: defineTable({
+      name: v.string(),
+      rank: v.string(), // e.g. "Owner", "Admin", "Moderator", "Helper"
+      tagline: v.optional(v.string()), // short blurb shown on the team page
+      emoji: v.optional(v.string()), // avatar badge
+      sortOrder: v.number(),
+    }).index("by_order", ["sortOrder"]),
   },
   {
     schemaValidation: false,
