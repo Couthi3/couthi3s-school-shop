@@ -133,8 +133,13 @@ export default function Admin() {
       toast.error("Pick an image file");
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Image is too large (max 5 MB)");
+    // GIFs (especially animated) run big, so they get a higher cap.
+    const isGif = file.type === "image/gif";
+    const maxBytes = isGif ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      toast.error(
+        isGif ? "GIF is too large (max 10 MB)" : "Image is too large (max 5 MB)",
+      );
       return;
     }
     setUploadingPhoto(true);
@@ -1326,7 +1331,9 @@ export default function Admin() {
                     )}
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    JPG/PNG, up to 5 MB. Shown on the public team page.
+                    JPG/PNG/GIF — GIFs up to 10 MB, photos up to 5 MB. Shown
+                    big on the public team page; use a tall image for best
+                    results.
                   </p>
                 </div>
               </div>
