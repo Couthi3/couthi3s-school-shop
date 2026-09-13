@@ -12,7 +12,16 @@ const schema = defineSchema(
       email: v.optional(v.string()),
       emailVerificationTime: v.optional(v.number()),
       isAnonymous: v.optional(v.boolean()),
-      isAdmin: v.optional(v.boolean()), // site admin, promoted via invite code
+      isAdmin: v.optional(v.boolean()), // site admin, promoted by the Owner account
+      adminRank: v.optional(
+        v.union(
+          v.literal("owner"),
+          v.literal("co_owner"),
+          v.literal("manager"),
+          v.literal("staff"),
+          v.literal("trainee"),
+        ),
+      ), // staff level — controls which admin powers the account has
       role: v.optional(v.string()),
       banned: v.optional(v.boolean()), // set by site admin; blocks all shop actions
       bannedAt: v.optional(v.number()),

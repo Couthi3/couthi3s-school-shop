@@ -1,25 +1,58 @@
 import { getAuthSessionId, getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
+import {
+  ADMIN_RANK_LEVEL,
+  CAP,
+  isAdminRank,
+  type AdminRank,
+} from "./adminRanks";
 
 /* -------------------------------- helpers --------------------------------- */
 
-// Site admins are the flagged user OR a browser session granted via the
-// admin-panel credential sign-in (same rule as admin.ts).
-export const requireAdmin = async (ctx: QueryCtx | MutationCtx) => {
+/**
+ * The signed-in viewer's effective admin level (0 = not an admin):
+ * - flagged user with an adminRank → that rank's level
+ * - flagged user named Couthi3 without a rank → Owner (5)
+ * - flagged user without a rank → Trainee (1, view-only)
+ * - browser session granted by the owner credential sign-in → Owner (5)
+ */
+export const currentAdminLevel = async (
+  ctx: QueryCtx | MutationCtx,
+): Promise<number> => {
   const userId = await getAuthUserId(ctx);
   if (userId !== null) {
     const user = await ctx.db.get(userId);
-    if (user?.isAdmin === true) return;
+    if (user?.isAdmin === true) {
+      if (user.adminRank !== undefined && isAdminRank(user.adminRank))
+        return ADMIN_RANK_LEVEL[user.adminRank];
+      return user.name === HEAD_ADMIN_USERNAME
+        ? ADMIN_RANK_LEVEL.owner
+        : ADMIN_RANK_LEVEL.trainee;
+    }
   }
   const sessionId = await getAuthSessionId(ctx);
-  if (sessionId === null) throw new Error("Admin access required");
+  if (sessionId === null) return 0;
   const grant = await ctx.db
     .query("adminSessions")
     .withIndex("by_session", (q) => q.eq("sessionId", sessionId))
     .first();
-  if (!grant) throw new Error("Admin access required");
+  return grant !== null ? ADMIN_RANK_LEVEL.owner : 0;
 };
+
+/** Throws unless the viewer's admin level is at least `minLevel`. */
+export const requireAdminLevel = async (
+  ctx: QueryCtx | MutationCtx,
+  minLevel: number,
+) => {
+  const level = await currentAdminLevel(ctx);
+  if (level < minLevel) throw new Error("Admin access required");
+};
+
+// Site admins are the flagged user OR a browser session granted via the
+// admin-panel credential sign-in (same rule as admin.ts).
+export const requireAdmin = async (ctx: QueryCtx | MutationCtx) =>
+  requireAdminLevel(ctx, CAP.viewPanel);
 
 /**
  * The single account allowed to manage staff ranks: the site owner's
@@ -28,38 +61,23 @@ export const requireAdmin = async (ctx: QueryCtx | MutationCtx) => {
 export const HEAD_ADMIN_USERNAME = "Couthi3";
 
 /**
- * Stricter than requireAdmin: only the Owner account (Couthi3) passes —
- * either the flagged user with that exact username, or a browser session
- * granted admin by signing in with the owner credentials.
+ * Stricter than requireAdmin: only the Owner (Couthi3) passes — either the
+ * flagged user with that exact username, or a browser session granted admin
+ * by signing in with the owner credentials.
  */
-export const requireHeadAdmin = async (ctx: QueryCtx | MutationCtx) => {
-  const userId = await getAuthUserId(ctx);
-  if (userId !== null) {
-    const user = await ctx.db.get(userId);
-    if (user?.isAdmin === true && user.name === HEAD_ADMIN_USERNAME) return;
-  }
-  const sessionId = await getAuthSessionId(ctx);
-  if (sessionId === null)
-    throw new Error("Only the Owner account can manage staff ranks");
-  const grant = await ctx.db
-    .query("adminSessions")
-    .withIndex("by_session", (q) => q.eq("sessionId", sessionId))
-    .first();
-  if (!grant)
-    throw new Error("Only the Owner account can manage staff ranks");
-};
+export const requireHeadAdmin = async (ctx: QueryCtx | MutationCtx) =>
+  requireAdminLevel(ctx, CAP.manageAccounts);
 
 /** Whether the current viewer is the Owner account (for hiding UI). */
 export const isHeadAdmin = query({
   args: {},
-  handler: async (ctx) => {
-    try {
-      await requireHeadAdmin(ctx);
-      return true;
-    } catch {
-      return false;
-    }
-  },
+  handler: async (ctx) => (await currentAdminLevel(ctx)) >= CAP.manageAccounts,
+});
+
+/** The viewer's admin level — lets the panel show/hide powers by rank. */
+export const myAdminLevel = query({
+  args: {},
+  handler: async (ctx) => currentAdminLevel(ctx),
 });
 
 /* ------------------------------ user functions ---------------------------- */
@@ -119,7 +137,7 @@ export const myTickets = query({
 export const allTickets = query({
   args: {},
   handler: async (ctx) => {
-    await requireAdmin(ctx);
+    await requireAdminLevel(ctx, CAP.viewPanel);
     const tickets = await ctx.db.query("tickets").collect();
     return tickets.sort((a, b) => b.createdAt - a.createdAt);
   },
@@ -135,7 +153,7 @@ export const updateTicket = mutation({
     adminNote: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireAdmin(ctx);
+    await requireAdminLevel(ctx, CAP.tickets);
     const ticket = await ctx.db.get(args.ticketId);
     if (!ticket) throw new Error("Ticket not found");
 
@@ -157,7 +175,7 @@ export const updateTicket = mutation({
 export const deleteTicket = mutation({
   args: { ticketId: v.id("tickets") },
   handler: async (ctx, args) => {
-    await requireAdmin(ctx);
+    await requireAdminLevel(ctx, CAP.tickets);
     await ctx.db.delete(args.ticketId);
   },
 });
@@ -166,7 +184,7 @@ export const deleteTicket = mutation({
 export const openTicketCount = query({
   args: {},
   handler: async (ctx) => {
-    await requireAdmin(ctx);
+    await requireAdminLevel(ctx, CAP.viewPanel);
     const tickets = await ctx.db.query("tickets").collect();
     return tickets.filter((t) => t.status !== "resolved").length;
   },

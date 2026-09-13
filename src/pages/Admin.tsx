@@ -31,6 +31,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TEAM_RANKS, rankBadgeClass } from "@/lib/team-ranks";
+import {
+  ADMIN_RANKS,
+  ADMIN_RANK_LABEL,
+  type AdminRank,
+} from "../convex/adminRanks";
 import { api } from "../convex/_generated/api";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useMutation, useQuery } from "convex/react";
@@ -53,6 +58,7 @@ import {
   User,
   UserCheck,
   UserPlus,
+  UserCog,
 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -60,6 +66,8 @@ import { toast } from "sonner";
 
 export default function Admin() {
   const adminState = useQuery(api.admin.adminState);
+  // Level drives which panel sections/actions render (owner session = 5).
+  const level = adminState?.level ?? 0;
   const allShops = useQuery(
     api.admin.allShops,
     adminState?.isAdmin ? {} : "skip",
@@ -72,13 +80,16 @@ export default function Admin() {
   const moveFeatured = useMutation(api.admin.moveFeatured);
   const deleteShop = useMutation(api.admin.deleteShop);
   const setUserBanned = useMutation(api.admin.setUserBanned);
-  const users = useQuery(api.admin.allUsers, adminState?.isAdmin ? {} : "skip");
+  const users = useQuery(
+    api.admin.allUsers,
+    level >= 4 ? {} : "skip",
+  );
 
   // New admin powers
   const stats = useQuery(api.admin.siteStats, adminState?.isAdmin ? {} : "skip");
   const announcements = useQuery(
     api.admin.allAnnouncements,
-    adminState?.isAdmin ? {} : "skip",
+    level >= 3 ? {} : "skip",
   );
   const postAnnouncement = useMutation(api.admin.postAnnouncement);
   const clearAnnouncement = useMutation(api.admin.clearAnnouncement);
@@ -97,6 +108,16 @@ export default function Admin() {
   // server-side requireHeadAdmin gate.
   const isHeadAdmin = useQuery(api.support.isHeadAdmin);
   const canManageTeam = adminState?.isAdmin === true && isHeadAdmin === true;
+  // Owner-only account management (backend enforces the same gate).
+  const canManageAccounts = level >= 5;
+  const adminAccountsList = useQuery(
+    api.admin.adminAccounts,
+    canManageAccounts ? {} : "skip",
+  );
+  const createAdminAccount = useMutation(api.admin.createAdminAccount);
+  const setAdminRank = useMutation(api.admin.setAdminRank);
+  const setAdminPassword = useMutation(api.admin.setAdminPassword);
+  const removeAdminAccount = useMutation(api.admin.removeAdminAccount);
   const teamMembers = useQuery(api.team.teamMembers);
   const addTeamMember = useMutation(api.team.addTeamMember);
   const updateTeamMember = useMutation(api.team.updateTeamMember);
@@ -241,6 +262,73 @@ export default function Admin() {
     try {
       await deleteTicket({ ticketId: ticketId as never });
       toast.success("Ticket deleted");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  };
+
+  // ---- Owner-only admin account management ----
+  const [acctDialog, setAcctDialog] = useState<{
+    userId: string | null;
+    username: string;
+    password: string;
+    rank: string;
+  } | null>(null);
+  const [savingAcct, setSavingAcct] = useState(false);
+
+  const handleCreateAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!acctDialog) return;
+    setSavingAcct(true);
+    try {
+      await createAdminAccount({
+        username: acctDialog.username,
+        password: acctDialog.password,
+        rank: acctDialog.rank,
+      });
+      toast.success(
+        `Admin account "${acctDialog.username}" created — share the credentials privately`,
+      );
+      setAcctDialog(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setSavingAcct(false);
+    }
+  };
+
+  const handleSetRank = async (userId: string, rank: string) => {
+    try {
+      await setAdminRank({ userId: userId as never, rank });
+      toast.success("Rank updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  };
+
+  const handleResetPassword = async (userId: string, name: string | null) => {
+    const pw = window.prompt(
+      `New password for ${name ?? "this account"} (min 8 chars):`,
+    );
+    if (!pw) return;
+    try {
+      await setAdminPassword({ userId: userId as never, password: pw });
+      toast.success("Password reset — their sessions were signed out");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  };
+
+  const handleRemoveAccount = async (userId: string, name: string | null) => {
+    if (
+      !window.confirm(
+        `Revoke admin access for "${name ?? "this account"}"? They will be signed out immediately and can no longer open the admin panel.`,
+      )
+    )
+      return;
+    try {
+      await removeAdminAccount({ userId: userId as never });
+      toast.success("Admin access revoked");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
     }
@@ -503,7 +591,112 @@ export default function Admin() {
                   ).toFixed(2)} money offered · ${stats.tradeOffers} trade${stats.tradeOffers === 1 ? "" : "s"}`}
             </p>
 
-            {/* Global announcements */}
+            {/* Owner-only: mint and manage admin accounts */}
+            {canManageAccounts && (
+              <section className="mt-10 max-w-2xl border-2 border-foreground p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <UserCog className="size-4 text-primary" />
+                    <span className="grid-label">Admin accounts</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() =>
+                      setAcctDialog({
+                        userId: null,
+                        username: "",
+                        password: "",
+                        rank: "trainee",
+                      })
+                    }
+                  >
+                    <UserPlus className="size-3.5" />
+                    Create admin account
+                  </Button>
+                </div>
+                <p className="mt-3 text-xs leading-4 text-muted-foreground">
+                  Only you (the Owner) can mint staff accounts. Each account
+                  signs in at /auth with the username and password you set, and
+                  their rank decides what they can do: Trainee (view only),
+                  Staff (tickets), Manager (+ announcements, featured,
+                  edit shops), Co-Owner (+ bans, delete shops).
+                </p>
+                {adminAccountsList !== undefined &&
+                  adminAccountsList.length > 0 && (
+                    <div className="mt-4 border-2 border-foreground">
+                      {adminAccountsList.map((a) => (
+                        <div
+                          key={a._id}
+                          className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+                        >
+                          <ShieldCheck className="size-4 shrink-0 text-primary" />
+                          <div className="min-w-0 flex-1">
+                            <span className="block truncate font-bold uppercase">
+                              {a.name ?? "(no name)"}
+                            </span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {a.name === "Couthi3"
+                                ? "Site Owner — cannot be changed"
+                                : "Signs in with the password you set"}
+                            </span>
+                          </div>
+                          {a.name === "Couthi3" ? (
+                            <span className="bg-[var(--swiss-red)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-white">
+                              Owner
+                            </span>
+                          ) : (
+                            <>
+                              <Select
+                                value={a.rank ?? "trainee"}
+                                onValueChange={(r) =>
+                                  void handleSetRank(a._id, r)
+                                }
+                              >
+                                <SelectTrigger className="h-8 w-36 border-foreground text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {ADMIN_RANKS.map((r) => (
+                                    <SelectItem key={r} value={r}>
+                                      {ADMIN_RANK_LABEL[r]}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <Button
+                                size="icon-sm"
+                                variant="outline"
+                                className="border-foreground"
+                                title="Set a new password"
+                                onClick={() =>
+                                  void handleResetPassword(a._id, a.name)
+                                }
+                              >
+                                <KeyRound className="size-3.5" />
+                              </Button>
+                              <Button
+                                size="icon-sm"
+                                variant="outline"
+                                className="border-destructive text-destructive"
+                                title="Revoke admin access"
+                                onClick={() =>
+                                  void handleRemoveAccount(a._id, a.name)
+                                }
+                              >
+                                <Trash2 className="size-3.5" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+              </section>
+            )}
+
+            {/* Global announcements — Manager and up */}
+            {level >= 3 && (
             <section className="mt-10">
               <h2 className="mb-4 text-xl font-bold uppercase">Announcement</h2>
               <form
@@ -627,6 +820,7 @@ export default function Admin() {
                 </div>
               )}
             </section>
+            )}
 
             <p className="mt-10 max-w-xl text-base leading-6 text-muted-foreground">
               Hand-pick the shops that appear on the explore page. Pinned shops
@@ -824,7 +1018,8 @@ export default function Admin() {
                   )}
                 </section>
 
-                {/* Users & moderation */}
+                {/* Users & moderation — Co-Owner and up */}
+                {level >= 4 && (
                 <section className="mt-12">
                   <h2 className="mb-5 text-xl font-bold uppercase">
                     Users
@@ -893,8 +1088,10 @@ export default function Admin() {
                     </div>
                   )}
                 </section>
+                )}
 
-                {/* Tickets */}
+                {/* Tickets — Staff and up */}
+                {level >= 2 && (
                 <section className="mt-12">
                   <h2 className="mb-5 text-xl font-bold uppercase">
                     Tickets
@@ -989,6 +1186,7 @@ export default function Admin() {
                     </div>
                   )}
                 </section>
+                )}
 
                 {/* Team roster management — Owner account only */}
                 {canManageTeam && (
@@ -1416,6 +1614,109 @@ export default function Admin() {
               {teamDialog?.id ? "Save changes" : "Add member"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Owner-only: create admin account dialog */}
+      <Dialog
+        open={acctDialog !== null}
+        onOpenChange={(open) => !open && setAcctDialog(null)}
+      >
+        <DialogContent className="border-2 border-foreground sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-bold uppercase tracking-tight">
+              Create admin account
+            </DialogTitle>
+            <DialogDescription>
+              They sign in at /auth with this username and password — no email
+              involved. Share the credentials privately; only you can mint
+              these accounts.
+            </DialogDescription>
+          </DialogHeader>
+          {acctDialog && (
+            <form onSubmit={handleCreateAccount} className="space-y-4">
+              <div>
+                <Label htmlFor="acct-username" className="grid-label mb-1.5 block">
+                  Username
+                </Label>
+                <Input
+                  id="acct-username"
+                  value={acctDialog.username}
+                  onChange={(e) =>
+                    setAcctDialog({ ...acctDialog, username: e.target.value })
+                  }
+                  maxLength={30}
+                  className="h-11 border-foreground"
+                  placeholder="e.g. staff_moderator"
+                />
+              </div>
+              <div>
+                <Label htmlFor="acct-password" className="grid-label mb-1.5 block">
+                  Password (min 8 characters)
+                </Label>
+                <Input
+                  id="acct-password"
+                  value={acctDialog.password}
+                  onChange={(e) =>
+                    setAcctDialog({ ...acctDialog, password: e.target.value })
+                  }
+                  maxLength={100}
+                  className="h-11 border-foreground"
+                  placeholder="Set an initial password"
+                />
+              </div>
+              <div>
+                <Label htmlFor="acct-rank" className="grid-label mb-1.5 block">
+                  Rank
+                </Label>
+                <Select
+                  value={acctDialog.rank}
+                  onValueChange={(r) => setAcctDialog({ ...acctDialog, rank: r })}
+                >
+                  <SelectTrigger id="acct-rank" className="h-11 border-foreground">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ADMIN_RANKS.filter((r) => r !== "owner").map((r) => (
+                      <SelectItem key={r} value={r}>
+                        {ADMIN_RANK_LABEL[r]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
+                  Trainee: view only · Staff: + tickets · Manager: +
+                  announcements, pin/edit shops · Co-Owner: + bans, delete
+                  shops.
+                </p>
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-foreground"
+                  onClick={() => setAcctDialog(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={
+                    savingAcct ||
+                    acctDialog.username.trim().length < 3 ||
+                    acctDialog.password.length < 8
+                  }
+                >
+                  {savingAcct ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <UserPlus className="size-4" />
+                  )}
+                  Create account
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
     </div>

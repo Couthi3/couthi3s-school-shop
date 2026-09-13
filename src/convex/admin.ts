@@ -1,6 +1,11 @@
 import { getAuthSessionId, getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
+import { ADMIN_RANK_LABEL, CAP, isAdminRank } from "./adminRanks";
+import { currentAdminLevel, requireAdminLevel } from "./support";
+// Same hash algorithm the Password provider uses, so owner-minted accounts
+// sign in through the normal /auth flow. Pure JS, Convex-safe.
+import { Scrypt } from "lucia";
 
 /* ------------------------------ credentials ------------------------------- */
 
@@ -26,37 +31,177 @@ const requireUserId = async (ctx: QueryCtx | MutationCtx) => {
   return userId;
 };
 
-// True when the current user is flagged admin OR the current browser session
-// was granted admin via the credential sign-in on the admin page.
-const currentIsAdmin = async (ctx: QueryCtx | MutationCtx) => {
-  const userId = await getAuthUserId(ctx);
-  if (userId !== null) {
-    const user = await ctx.db.get(userId);
-    if (user?.isAdmin === true) return true;
-  }
-  const sessionId = await getAuthSessionId(ctx);
-  if (sessionId === null) return false;
-  const grant = await ctx.db
-    .query("adminSessions")
-    .withIndex("by_session", (q) => q.eq("sessionId", sessionId))
-    .first();
-  return grant !== null;
-};
+// True when the viewer has at least panel-access level.
+const currentIsAdmin = async (ctx: QueryCtx | MutationCtx) =>
+  (await currentAdminLevel(ctx)) >= CAP.viewPanel;
 
 /* ------------------------------- admin state ------------------------------ */
 
 export const adminState = query({
   args: {},
   handler: async (ctx) => {
-    const isAdmin = await currentIsAdmin(ctx);
+    const level = await currentAdminLevel(ctx);
     const signedIn = (await getAuthUserId(ctx)) !== null;
-    return { isAdmin, signedIn };
+    return { isAdmin: level >= CAP.viewPanel, level, signedIn };
   },
 });
 
 export const isAdmin = query({
   args: {},
   handler: async (ctx) => currentIsAdmin(ctx),
+});
+
+/* --------------------------- admin account admin -------------------------- */
+// Owner-only tools to mint and manage staff admin accounts.
+
+// All admin accounts with their rank, for the owner's management list.
+export const adminAccounts = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdminLevel(ctx, CAP.manageAccounts);
+    const users = await ctx.db.query("users").collect();
+    return users
+      .filter((u) => u.isAdmin === true)
+      .sort((a, b) => a.name?.localeCompare(b.name ?? "") ?? 0)
+      .map((u) => ({
+        _id: u._id,
+        name: u.name ?? null,
+        rank: u.adminRank ?? null,
+      }));
+  },
+});
+
+/**
+ * Create a new admin account (username + password, same Password provider
+ * storage format so it signs in through the normal /auth page). The account
+ * is flagged admin with the chosen rank immediately.
+ */
+export const createAdminAccount = mutation({
+  args: {
+    username: v.string(),
+    password: v.string(),
+    rank: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireAdminLevel(ctx, CAP.manageAccounts);
+
+    const username = args.username.trim();
+    if (username.length < 3)
+      throw new Error("Username must be at least 3 characters");
+    if (username.length > 30)
+      throw new Error("Username is too long (max 30)");
+    if (!/^[A-Za-z0-9_.-]+$/.test(username))
+      throw new Error("Username can only use letters, numbers, _ . and -");
+    if (args.password.length < 8)
+      throw new Error("Password must be at least 8 characters");
+    if (args.password.length > 100)
+      throw new Error("Password is too long (max 100)");
+    if (!isAdminRank(args.rank)) throw new Error("Pick a valid rank");
+
+    // Usernames are unique across the whole auth system (email index).
+    const clash = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", username))
+      .first();
+    if (clash) throw new Error("That username is already taken");
+
+    // Hash with the same Lucia scrypt the Password provider uses, so the
+    // created account signs in through the normal /auth flow.
+    const secret = await new Scrypt().hash(args.password);
+
+    const userId = await ctx.db.insert("users", {
+      email: username,
+      name: username,
+      isAdmin: true,
+      adminRank: args.rank,
+    });
+    await ctx.db.insert("authAccounts", {
+      userId,
+      provider: "password",
+      providerAccountId: username,
+      secret,
+    });
+    return { userId };
+  },
+});
+
+/** Promote/demote an admin account's rank. Owner cannot demote themselves. */
+export const setAdminRank = mutation({
+  args: { userId: v.id("users"), rank: v.string() },
+  handler: async (ctx, args) => {
+    await requireAdminLevel(ctx, CAP.manageAccounts);
+    const target = await ctx.db.get(args.userId);
+    if (!target || target.isAdmin !== true)
+      throw new Error("Admin account not found");
+    if (!isAdminRank(args.rank)) throw new Error("Pick a valid rank");
+    if (target.name === "Couthi3" && args.rank !== "owner")
+      throw new Error("The Owner account cannot be demoted");
+    await ctx.db.patch(args.userId, { adminRank: args.rank });
+  },
+});
+
+/** Set a new password for an admin account (e.g. after a leak). */
+export const setAdminPassword = mutation({
+  args: { userId: v.id("users"), password: v.string() },
+  handler: async (ctx, args) => {
+    await requireAdminLevel(ctx, CAP.manageAccounts);
+    const target = await ctx.db.get(args.userId);
+    if (!target || target.isAdmin !== true)
+      throw new Error("Admin account not found");
+    if (args.password.length < 8)
+      throw new Error("Password must be at least 8 characters");
+    if (args.password.length > 100)
+      throw new Error("Password is too long (max 100)");
+
+    const secret = await new Scrypt().hash(args.password);
+    const account = await ctx.db
+      .query("authAccounts")
+      .withIndex("userIdAndProvider", (q) =>
+        q.eq("userId", args.userId).eq("provider", "password"),
+      )
+      .first();
+    if (!account) throw new Error("No password account attached");
+    await ctx.db.patch(account._id, { secret });
+
+    // Force every existing session to re-sign-in.
+    const sessions = await ctx.db
+      .query("authSessions")
+      .withIndex("userId", (q) => q.eq("userId", args.userId))
+      .collect();
+    for (const s of sessions) await ctx.db.delete(s._id);
+  },
+});
+
+/** Revoke an admin account: unflag, delete its credential, kill sessions. */
+export const removeAdminAccount = mutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    await requireAdminLevel(ctx, CAP.manageAccounts);
+    const target = await ctx.db.get(args.userId);
+    if (!target || target.isAdmin !== true)
+      throw new Error("Admin account not found");
+    if (target.name === "Couthi3")
+      throw new Error("The Owner account cannot be removed");
+
+    const account = await ctx.db
+      .query("authAccounts")
+      .withIndex("userIdAndProvider", (q) =>
+        q.eq("userId", args.userId).eq("provider", "password"),
+      )
+      .first();
+    if (account) await ctx.db.delete(account._id);
+
+    const sessions = await ctx.db
+      .query("authSessions")
+      .withIndex("userId", (q) => q.eq("userId", args.userId))
+      .collect();
+    for (const s of sessions) await ctx.db.delete(s._id);
+
+    await ctx.db.patch(args.userId, {
+      isAdmin: false,
+      adminRank: undefined,
+    });
+  },
 });
 
 /**
@@ -112,7 +257,7 @@ export const adminSignOut = mutation({
 export const deleteShop = mutation({
   args: { shopId: v.id("shops") },
   handler: async (ctx, args) => {
-    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await requireAdminLevel(ctx, CAP.deleteShops);
     const shop = await ctx.db.get(args.shopId);
     if (!shop) throw new Error("Shop not found");
 
@@ -162,7 +307,7 @@ export const deleteShop = mutation({
 export const allUsers = query({
   args: {},
   handler: async (ctx) => {
-    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await requireAdminLevel(ctx, CAP.bans);
     const users = await ctx.db.query("users").collect();
     return users
       .filter((u) => u.isAnonymous !== true)
@@ -184,7 +329,7 @@ export const allUsers = query({
 export const setUserBanned = mutation({
   args: { userId: v.id("users"), banned: v.boolean() },
   handler: async (ctx, args) => {
-    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await requireAdminLevel(ctx, CAP.bans);
     const target = await ctx.db.get(args.userId);
     if (!target) throw new Error("User not found");
     if (target.isAdmin === true) throw new Error("Cannot ban a site admin");
@@ -209,7 +354,7 @@ export const setUserBanned = mutation({
 export const allShops = query({
   args: {},
   handler: async (ctx) => {
-    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await requireAdminLevel(ctx, CAP.viewPanel);
     return await ctx.db.query("shops").collect();
   },
 });
@@ -217,7 +362,7 @@ export const allShops = query({
 export const setFeatured = mutation({
   args: { shopId: v.id("shops"), featured: v.boolean() },
   handler: async (ctx, args) => {
-    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await requireAdminLevel(ctx, CAP.featured);
     const shop = await ctx.db.get(args.shopId);
     if (!shop) throw new Error("Shop not found");
     if (args.featured) {
@@ -240,7 +385,7 @@ export const moveFeatured = mutation({
     direction: v.union(v.literal("up"), v.literal("down")),
   },
   handler: async (ctx, args) => {
-    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await requireAdminLevel(ctx, CAP.featured);
     const featured = (await ctx.db.query("shops").collect())
       .filter((s) => s.featured)
       .sort((a, b) => a.featuredOrder - b.featuredOrder);
@@ -262,7 +407,7 @@ void requireUserId;
 export const siteStats = query({
   args: {},
   handler: async (ctx) => {
-    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await requireAdminLevel(ctx, CAP.viewPanel);
 
     const [shops, users, items, orders, codes] = await Promise.all([
       ctx.db.query("shops").collect(),
@@ -318,7 +463,7 @@ export const activeAnnouncement = query({
 export const allAnnouncements = query({
   args: {},
   handler: async (ctx) => {
-    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await requireAdminLevel(ctx, CAP.announcements);
     const rows = await ctx.db.query("announcements").collect();
     return rows.sort((a, b) => b.createdAt - a.createdAt);
   },
@@ -331,7 +476,7 @@ export const allAnnouncements = query({
 export const postAnnouncement = mutation({
   args: { text: v.string(), urgent: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
-    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await requireAdminLevel(ctx, CAP.announcements);
     const text = args.text.trim();
     if (text.length === 0) throw new Error("Announcement cannot be empty");
     if (text.length > 200)
@@ -358,7 +503,7 @@ export const postAnnouncement = mutation({
 export const clearAnnouncement = mutation({
   args: { announcementId: v.id("announcements") },
   handler: async (ctx, args) => {
-    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await requireAdminLevel(ctx, CAP.announcements);
     await ctx.db.patch(args.announcementId, { active: false });
   },
 });
@@ -367,7 +512,7 @@ export const clearAnnouncement = mutation({
 export const deleteAnnouncement = mutation({
   args: { announcementId: v.id("announcements") },
   handler: async (ctx, args) => {
-    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await requireAdminLevel(ctx, CAP.announcements);
     await ctx.db.delete(args.announcementId);
   },
 });
@@ -385,7 +530,7 @@ export const adminUpdateShop = mutation({
     description: v.string(),
   },
   handler: async (ctx, args) => {
-    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await requireAdminLevel(ctx, CAP.editShops);
     const shop = await ctx.db.get(args.shopId);
     if (!shop) throw new Error("Shop not found");
 
@@ -407,7 +552,7 @@ export const adminUpdateShop = mutation({
 export const adminResetShopCode = mutation({
   args: { shopId: v.id("shops") },
   handler: async (ctx, args) => {
-    if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
+    await requireAdminLevel(ctx, CAP.editShops);
     const shop = await ctx.db.get(args.shopId);
     if (!shop) throw new Error("Shop not found");
 
