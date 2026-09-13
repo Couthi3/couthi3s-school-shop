@@ -5,6 +5,21 @@ import { MutationCtx, QueryCtx, mutation, query } from "./_generated/server";
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no lookalike characters
 
+// Default pickup periods for new shops. Owners can customize these (with
+// subjects) from their dashboard settings.
+export const DEFAULT_PERIODS = [
+  "Before school",
+  "Period 1",
+  "Period 2",
+  "Period 3",
+  "Period 4",
+  "Period 5",
+  "Period 6",
+  "Period 7",
+  "Period 8",
+  "After school",
+];
+
 const randomCode = (length: number) => {
   const bytes = new Uint8Array(length);
   crypto.getRandomValues(bytes);
@@ -132,6 +147,7 @@ export const createShop = mutation({
       description,
       featured: false,
       featuredOrder: 0,
+      periods: [...DEFAULT_PERIODS],
     });
     const code = randomCode(8);
     await ctx.db.insert("shopCodes", { code, shopId });
@@ -162,6 +178,35 @@ export const saveShopProfile = mutation({
     if (description.length > 200)
       throw new Error("Description is too long (max 200)");
     await ctx.db.patch(args.shopId, { name, description });
+  },
+});
+
+/**
+ * Replace the shop's pickup-period list, e.g.
+ * ["Before school", "Period 1 — Math", "Period 3 — Science"].
+ * Buyers must pick one of these when ordering.
+ */
+export const saveShopPeriods = mutation({
+  args: { shopId: v.id("shops"), periods: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    await assertShopAccess(ctx, args.shopId);
+
+    const periods = args.periods
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+    if (periods.length === 0)
+      throw new Error("Add at least one pickup period");
+    if (periods.length > 15)
+      throw new Error("Too many periods (max 15)");
+    for (const p of periods) {
+      if (p.length > 40)
+        throw new Error(`“${p}” is too long (max 40 characters)`);
+    }
+    const lower = periods.map((p) => p.toLowerCase());
+    if (new Set(lower).size !== periods.length)
+      throw new Error("Periods must be unique");
+
+    await ctx.db.patch(args.shopId, { periods });
   },
 });
 
@@ -249,6 +294,7 @@ export const publicShop = query({
       _id: shop._id,
       name: shop.name,
       description: shop.description,
+      periods: shop.periods ?? DEFAULT_PERIODS,
       items: items
         .filter((i) => i.available)
         .sort((a, b) => a.sortOrder - b.sortOrder)
@@ -368,8 +414,9 @@ export const placeOrder = mutation({
     const note = args.note?.trim() || undefined;
     if (buyerName.length < 1) throw new Error("Your name is required");
     if (buyerName.length > 60) throw new Error("Name is too long (max 60)");
-    if (period.length < 1) throw new Error("Pick a period");
-    if (period.length > 40) throw new Error("Period is too long");
+    const allowedPeriods = shop.periods ?? DEFAULT_PERIODS;
+    if (!allowedPeriods.includes(period))
+      throw new Error("Pick one of this shop's delivery periods");
     if (note && note.length > 200)
       throw new Error("Note is too long (max 200)");
     if (!Number.isInteger(args.quantity) || args.quantity < 1 || args.quantity > 20)

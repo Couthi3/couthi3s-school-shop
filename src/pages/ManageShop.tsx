@@ -76,12 +76,15 @@ export default function ManageShop() {
   const deleteItem = useMutation(api.shops.deleteItem);
   const setOrderStatus = useMutation(api.shops.setOrderStatus);
   const saveProfile = useMutation(api.shops.saveShopProfile);
+  const savePeriods = useMutation(api.shops.saveShopPeriods);
 
   const [drafts, setDrafts] = useState<ItemDraft[]>([emptyDraft()]);
   const [savingAll, setSavingAll] = useState(false);
   const [shopName, setShopName] = useState("");
   const [shopDesc, setShopDesc] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
+  const [periodInputs, setPeriodInputs] = useState<string[]>([]);
+  const [savingPeriods, setSavingPeriods] = useState(false);
 
   // Seed drafts from server items once they load.
   useEffect(() => {
@@ -104,6 +107,7 @@ export default function ManageShop() {
     if (shop) {
       setShopName(shop.name);
       setShopDesc(shop.description ?? "");
+      setPeriodInputs(shop.periods ?? [...PICKUP_PERIODS]);
     }
   }, [shop]);
 
@@ -197,6 +201,26 @@ export default function ManageShop() {
       toast.success("Code copied");
     } catch {
       toast.error("Copy failed — select and copy manually");
+    }
+  };
+
+  const updatePeriod = (index: number, value: string) => {
+    setPeriodInputs((ps) => ps.map((p, i) => (i === index ? value : p)));
+  };
+
+  const handleSavePeriods = async () => {
+    if (!shopId) return;
+    setSavingPeriods(true);
+    try {
+      await savePeriods({
+        shopId,
+        periods: periodInputs,
+      });
+      toast.success("Pickup periods saved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSavingPeriods(false);
     }
   };
 
@@ -672,8 +696,66 @@ export default function ManageShop() {
                 <h2 className="mb-2 text-xl font-bold uppercase">
                   Pickup periods
                 </h2>
-                <p className="text-xs leading-4 text-muted-foreground">
-                  Buyers currently choose from: {PICKUP_PERIODS.join(" · ")}.
+                <p className="mb-4 text-xs leading-4 text-muted-foreground">
+                  Buyers choose one of these at checkout. Add a subject to a
+                  period, like “Period 3 — Science”, so you know where to
+                  deliver.
+                </p>
+                <div className="space-y-2">
+                  {periodInputs.map((p, idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <Input
+                        value={p}
+                        onChange={(e) => updatePeriod(idx, e.target.value)}
+                        placeholder={`Period ${idx + 1} — Subject`}
+                        maxLength={40}
+                        className="h-10 border-foreground"
+                      />
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        title="Remove period"
+                        className="shrink-0"
+                        disabled={periodInputs.length <= 1}
+                        onClick={() =>
+                          setPeriodInputs((ps) =>
+                            ps.filter((_, i) => i !== idx),
+                          )
+                        }
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 border-foreground"
+                    disabled={periodInputs.length >= 15}
+                    onClick={() => setPeriodInputs((ps) => [...ps, ""])}
+                  >
+                    <Plus className="size-3.5" />
+                    Add period
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={savingPeriods}
+                    onClick={handleSavePeriods}
+                  >
+                    {savingPeriods ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Check className="size-3.5" />
+                    )}
+                    Save periods
+                  </Button>
+                </div>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Tip: name periods with the subject, e.g. “Period 2 — Gym”.
+                  Buyers see these exact labels.
                 </p>
               </div>
             </div>

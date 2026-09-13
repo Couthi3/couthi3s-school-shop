@@ -25,6 +25,7 @@ const schema = defineSchema(
       description: v.string(),
       featured: v.boolean(), // hand-picked by the site admin
       featuredOrder: v.number(), // admin-controlled ordering of featured shops
+      periods: v.optional(v.array(v.string())), // owner-defined pickup periods, e.g. "Period 1 — Math"
     })
       .index("by_owner", ["ownerId"])
       .index("by_featured", ["featured", "featuredOrder"]),

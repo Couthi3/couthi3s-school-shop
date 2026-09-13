@@ -24,7 +24,7 @@ import { Loader2, Minus, Package, Plus, ShoppingBag } from "lucide-react";
 import { useState } from "react";
 import { useParams } from "react-router";
 import { toast } from "sonner";
-import { PICKUP_PERIODS, formatPrice } from "@/lib/shop-format";
+import { formatPrice } from "@/lib/shop-format";
 
 export default function Storefront() {
   const { shopId } = useParams<{ shopId: string }>();
@@ -119,6 +119,16 @@ export default function Storefront() {
                 Pick an item, choose the period you want it delivered in, and
                 the shop owner will see it instantly.
               </p>
+              <div className="mt-4 flex flex-wrap gap-1.5">
+                {shop.periods.map((p) => (
+                  <span
+                    key={p}
+                    className="border border-foreground bg-background px-2 py-1 text-[10px] font-bold uppercase tracking-wide"
+                  >
+                    {p}
+                  </span>
+                ))}
+              </div>
             </div>
           </section>
 
@@ -215,7 +225,7 @@ export default function Storefront() {
                     <SelectValue placeholder="Pick period" />
                   </SelectTrigger>
                   <SelectContent>
-                    {PICKUP_PERIODS.map((p) => (
+                    {(shop?.periods ?? []).map((p) => (
                       <SelectItem key={p} value={p}>
                         {p}
                       </SelectItem>
