@@ -440,7 +440,7 @@ export default function Admin() {
           /* --------------------------- admin sign in -------------------------- */
           <div className="mt-6 max-w-md border-2 border-foreground p-8">
             <div className="mb-4 flex size-10 items-center justify-center bg-[var(--swiss-blue)]">
-              <User className="size-5 text-white" />
+              <User className="size-5 text-background" />
             </div>
             <h1 className="text-2xl font-bold uppercase tracking-tight">
               Admin sign-in

@@ -27,7 +27,7 @@ export function SwissHeader() {
             <Store className="size-4 text-primary-foreground" strokeWidth={2.5} />
           </span>
           <span className="text-sm font-bold uppercase tracking-[0.18em]">
-            School Shops
+            Ralsei's School Shops
           </span>
         </Link>
 

@@ -382,7 +382,7 @@ export default function ManageShop() {
                     </div>
                     <div className="text-sm">
                       {order.buyerName}
-                      <span className="ml-2 inline-block bg-[var(--swiss-blue)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                      <span className="ml-2 inline-block bg-[var(--swiss-blue)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-background">
                         {order.period}
                       </span>
                       {order.note && (

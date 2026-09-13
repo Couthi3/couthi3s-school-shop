@@ -40,7 +40,7 @@ export default function Landing() {
             transition={{ duration: 0.4, ease: "easeOut" }}
           >
             <h1 className="text-3xl font-bold uppercase leading-none tracking-tight md:text-5xl">
-              School Shops<span className="opacity-60">.</span>
+              Ralsei's School Shops
             </h1>
             <p className="mt-2 max-w-xl text-sm leading-5 md:text-base md:leading-6">
               Free storefronts for your school — buyers pick the period they
@@ -221,7 +221,7 @@ export default function Landing() {
 
       <footer className="border-t-2 border-foreground">
         <div className="container-swiss flex flex-col gap-2 py-8 md:flex-row md:items-center md:justify-between">
-          <span className="grid-label">School Shops — built for students</span>
+          <span className="grid-label">Ralsei's School Shops — built for students</span>
           <div className="flex gap-5 text-sm">
             <Link to="/shop-signin" className="hover:text-primary">
               Shop sign-in
