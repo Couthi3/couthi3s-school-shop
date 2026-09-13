@@ -1,27 +1,59 @@
 import { v } from "convex/values";
+import { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { requireAdmin } from "./support";
+import { isTeamRank, RANK_LEVEL, type TeamRank } from "./teamRanks";
 
 /* -------------------------------- public ---------------------------------- */
 
-// The public team roster, ordered by rank (Owner first).
+// The public team roster, sorted by rank (Owner first), then by insertion
+// order within the same rank. Image URLs are resolved server-side.
 export const teamMembers = query({
   args: {},
   handler: async (ctx) => {
     const members = await ctx.db.query("teamMembers").collect();
-    return members.sort((a, b) => a.sortOrder - b.sortOrder);
+    const resolved = await Promise.all(
+      members.map(async (m) => ({
+        _id: m._id,
+        name: m.name,
+        rank: m.rank,
+        tagline: m.tagline ?? null,
+        imageUrl: m.imageId
+          ? ((await ctx.storage.getUrl(m.imageId)) ?? null)
+          : null,
+        sortOrder: m.sortOrder,
+      })),
+    );
+    return resolved.sort((a, b) => {
+      const la = RANK_LEVEL[a.rank as TeamRank] ?? 99;
+      const lb = RANK_LEVEL[b.rank as TeamRank] ?? 99;
+      if (la !== lb) return la - lb;
+      return a.sortOrder - b.sortOrder;
+    });
   },
 });
 
 /* --------------------------------- admin ---------------------------------- */
 
-/** Add a team member. Highest rank entries should get the lowest sortOrder. */
+/**
+ * Create an upload URL for a staff photo. The client POSTs the file to it,
+ * then passes the returned storage id to add/update.
+ */
+export const generateUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+/** Add a team member. */
 export const addTeamMember = mutation({
   args: {
     name: v.string(),
     rank: v.string(),
     tagline: v.optional(v.string()),
-    emoji: v.optional(v.string()),
+    imageId: v.optional(v.id("_storage")),
   },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
@@ -29,15 +61,11 @@ export const addTeamMember = mutation({
     const name = args.name.trim();
     const rank = args.rank.trim();
     const tagline = args.tagline?.trim() || undefined;
-    const emoji = args.emoji?.trim() || undefined;
     if (name.length < 1) throw new Error("Name is required");
     if (name.length > 40) throw new Error("Name is too long (max 40)");
-    if (rank.length < 1) throw new Error("Rank is required");
-    if (rank.length > 30) throw new Error("Rank is too long (max 30)");
+    if (!isTeamRank(rank)) throw new Error("Pick one of the listed ranks");
     if (tagline && tagline.length > 100)
       throw new Error("Tagline is too long (max 100)");
-    if (emoji && Array.from(emoji).length > 4)
-      throw new Error("Emoji is too long");
 
     const existing = await ctx.db.query("teamMembers").collect();
     const maxOrder = existing.reduce((m, t) => Math.max(m, t.sortOrder), 0);
@@ -45,20 +73,20 @@ export const addTeamMember = mutation({
       name,
       rank,
       tagline,
-      emoji,
+      imageId: args.imageId,
       sortOrder: maxOrder + 1,
     });
   },
 });
 
-/** Edit a team member's name, rank, tagline, or emoji. */
+/** Edit a team member. Pass imageId: null to clear the photo, or a new storage id to replace it. */
 export const updateTeamMember = mutation({
   args: {
     memberId: v.id("teamMembers"),
     name: v.string(),
     rank: v.string(),
     tagline: v.optional(v.string()),
-    emoji: v.optional(v.string()),
+    imageId: v.optional(v.union(v.id("_storage"), v.null())),
   },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
@@ -68,30 +96,35 @@ export const updateTeamMember = mutation({
     const name = args.name.trim();
     const rank = args.rank.trim();
     const tagline = args.tagline?.trim() || undefined;
-    const emoji = args.emoji?.trim() || undefined;
     if (name.length < 1) throw new Error("Name is required");
     if (name.length > 40) throw new Error("Name is too long (max 40)");
-    if (rank.length < 1) throw new Error("Rank is required");
-    if (rank.length > 30) throw new Error("Rank is too long (max 30)");
+    if (!isTeamRank(rank)) throw new Error("Pick one of the listed ranks");
     if (tagline && tagline.length > 100)
       throw new Error("Tagline is too long (max 100)");
-    if (emoji && Array.from(emoji).length > 4)
-      throw new Error("Emoji is too long");
 
-    await ctx.db.patch(args.memberId, { name, rank, tagline, emoji });
+    const patch: Record<string, unknown> = { name, rank, tagline };
+    if (args.imageId !== undefined) {
+      // Delete the old image so storage doesn't fill with orphans.
+      if (member.imageId) await ctx.storage.delete(member.imageId);
+      patch.imageId = args.imageId;
+    }
+    await ctx.db.patch(args.memberId, patch as never);
   },
 });
 
-/** Remove a team member from the public roster. */
+/** Remove a team member (and their photo from storage). */
 export const removeTeamMember = mutation({
   args: { memberId: v.id("teamMembers") },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
+    const member = await ctx.db.get(args.memberId);
+    if (!member) return;
+    if (member.imageId) await ctx.storage.delete(member.imageId);
     await ctx.db.delete(args.memberId);
   },
 });
 
-/** Move a team member up or down the roster (rank display order). */
+/** Explicit reorder (kept for fine-tuning within a rank group). */
 export const moveTeamMember = mutation({
   args: {
     memberId: v.id("teamMembers"),

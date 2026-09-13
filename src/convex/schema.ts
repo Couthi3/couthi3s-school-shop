@@ -146,9 +146,9 @@ const schema = defineSchema(
     // Public "Meet the team" roster, managed by the site admin.
     teamMembers: defineTable({
       name: v.string(),
-      rank: v.string(), // e.g. "Owner", "Admin", "Moderator", "Helper"
+      rank: v.string(), // one of TEAM_RANKS, e.g. "Owner", "Co-Owner", "Manager"
       tagline: v.optional(v.string()), // short blurb shown on the team page
-      emoji: v.optional(v.string()), // avatar badge
+      imageId: v.optional(v.id("_storage")), // uploaded staff photo/avatar
       sortOrder: v.number(),
     }).index("by_order", ["sortOrder"]),
   },

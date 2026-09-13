@@ -14,6 +14,7 @@ import type * as http from "../http.js";
 import type * as shops from "../shops.js";
 import type * as support from "../support.js";
 import type * as team from "../team.js";
+import type * as teamRanks from "../teamRanks.js";
 import type * as users from "../users.js";
 
 import type {
@@ -29,6 +30,7 @@ declare const fullApi: ApiFromModules<{
   shops: typeof shops;
   support: typeof support;
   team: typeof team;
+  teamRanks: typeof teamRanks;
   users: typeof users;
 }>;
 

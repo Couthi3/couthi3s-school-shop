@@ -23,6 +23,14 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { SwissHeader } from "@/components/SwissHeader";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { TEAM_RANKS, rankBadgeClass } from "@/lib/team-ranks";
 import { api } from "../convex/_generated/api";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useMutation, useQuery } from "convex/react";
@@ -41,6 +49,7 @@ import {
   ShieldCheck,
   TriangleAlert,
   Trash2,
+  Upload,
   User,
   UserCheck,
   UserPlus,
@@ -111,9 +120,49 @@ export default function Admin() {
     name: string;
     rank: string;
     tagline: string;
-    emoji: string;
+    imageId: string | null;
+    imageUrl: string | null;
   } | null>(null);
   const [savingTeam, setSavingTeam] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const generateUploadUrl = useMutation(api.team.generateUploadUrl);
+
+  const handlePhotoUpload = async (file: File) => {
+    if (!teamDialog) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Pick an image file");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image is too large (max 5 MB)");
+      return;
+    }
+    setUploadingPhoto(true);
+    try {
+      const url = await generateUploadUrl();
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!res.ok) throw new Error("Upload failed");
+      const { storageId } = (await res.json()) as { storageId: string };
+      setTeamDialog({
+        ...teamDialog,
+        imageId: storageId,
+        imageUrl: URL.createObjectURL(file),
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const clearPhoto = () => {
+    if (!teamDialog) return;
+    setTeamDialog({ ...teamDialog, imageId: null, imageUrl: null });
+  };
 
   const saveTeamMember = async () => {
     if (!teamDialog) return;
@@ -125,7 +174,13 @@ export default function Admin() {
           name: teamDialog.name,
           rank: teamDialog.rank,
           tagline: teamDialog.tagline || undefined,
-          emoji: teamDialog.emoji || undefined,
+          // null clears the photo; a new id replaces it; undefined keeps it
+          imageId:
+            teamDialog.imageId !== null
+              ? (teamDialog.imageId as never)
+              : teamDialog.imageUrl === null
+                ? null
+                : undefined,
         });
         toast.success("Team member updated");
       } else {
@@ -133,7 +188,7 @@ export default function Admin() {
           name: teamDialog.name,
           rank: teamDialog.rank,
           tagline: teamDialog.tagline || undefined,
-          emoji: teamDialog.emoji || undefined,
+          imageId: (teamDialog.imageId ?? undefined) as never,
         });
         toast.success("Added to the team");
       }
@@ -939,7 +994,14 @@ export default function Admin() {
                       size="sm"
                       className="gap-1.5"
                       onClick={() =>
-                        setTeamDialog({ id: null, name: "", rank: "", tagline: "", emoji: "" })
+                        setTeamDialog({
+                          id: null,
+                          name: "",
+                          rank: "",
+                          tagline: "",
+                          imageId: null,
+                          imageUrl: null,
+                        })
                       }
                     >
                       <UserPlus className="size-3.5" />
@@ -968,16 +1030,32 @@ export default function Admin() {
                           <span className="font-mono-swiss w-8 text-lg font-bold text-primary">
                             {String(idx + 1).padStart(2, "0")}
                           </span>
-                          <span className="text-xl" aria-hidden>
-                            {m.emoji || ""}
-                          </span>
+                          {m.imageUrl ? (
+                            <img
+                              src={m.imageUrl}
+                              alt=""
+                              className="size-10 shrink-0 border-2 border-foreground object-cover"
+                            />
+                          ) : (
+                            <span className="flex size-10 shrink-0 items-center justify-center border-2 border-foreground bg-muted text-sm font-bold uppercase">
+                              {m.name.charAt(0)}
+                            </span>
+                          )}
                           <div className="min-w-0 flex-1">
                             <span className="block truncate font-bold uppercase">
                               {m.name}
                             </span>
-                            <span className="block truncate text-xs text-muted-foreground">
-                              {m.rank}
-                              {m.tagline ? ` — ${m.tagline}` : ""}
+                            <span className="mt-0.5 flex flex-wrap items-center gap-2">
+                              <span
+                                className={`px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-widest ${rankBadgeClass(m.rank)}`}
+                              >
+                                {m.rank}
+                              </span>
+                              {m.tagline && (
+                                <span className="truncate text-xs text-muted-foreground">
+                                  {m.tagline}
+                                </span>
+                              )}
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5">
@@ -1012,7 +1090,8 @@ export default function Admin() {
                                   name: m.name,
                                   rank: m.rank,
                                   tagline: m.tagline ?? "",
-                                  emoji: m.emoji ?? "",
+                                  imageId: null,
+                                  imageUrl: m.imageUrl,
                                 })
                               }
                             >
@@ -1198,51 +1277,92 @@ export default function Admin() {
           </DialogHeader>
           {teamDialog && (
             <div className="space-y-4">
-              <div className="grid grid-cols-[1fr_2rem] gap-2">
-                <div>
-                  <Label htmlFor="team-name" className="grid-label mb-1.5 block">
-                    Name
-                  </Label>
-                  <Input
-                    id="team-name"
-                    value={teamDialog.name}
-                    onChange={(e) =>
-                      setTeamDialog({ ...teamDialog, name: e.target.value })
-                    }
-                    maxLength={40}
-                    className="h-11 border-foreground"
+              <div className="flex items-center gap-4">
+                {teamDialog.imageUrl ? (
+                  <img
+                    src={teamDialog.imageUrl}
+                    alt=""
+                    className="size-20 shrink-0 border-2 border-foreground object-cover"
                   />
+                ) : (
+                  <span className="flex size-20 shrink-0 items-center justify-center border-2 border-dashed border-foreground bg-muted text-xl font-bold uppercase text-muted-foreground">
+                    {teamDialog.name.charAt(0).toUpperCase() || "?"}
+                  </span>
+                )}
+                <div className="space-y-1.5">
+                  <Label className="grid-label block">Photo</Label>
+                  <div className="flex flex-wrap gap-2">
+                    <label className="cursor-pointer">
+                      <span className="inline-flex h-8 items-center gap-1.5 border-2 border-foreground px-3 text-xs font-bold uppercase tracking-wide hover:bg-muted">
+                        {uploadingPhoto ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <Upload className="size-3.5" />
+                        )}
+                        {teamDialog.imageUrl ? "Replace" : "Upload"}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={uploadingPhoto}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) void handlePhotoUpload(file);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                    {teamDialog.imageUrl && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="border-foreground"
+                        onClick={clearPhoto}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    JPG/PNG, up to 5 MB. Shown on the public team page.
+                  </p>
                 </div>
-                <div>
-                  <Label htmlFor="team-emoji" className="grid-label mb-1.5 block">
-                    Icon
-                  </Label>
-                  <Input
-                    id="team-emoji"
-                    value={teamDialog.emoji}
-                    onChange={(e) =>
-                      setTeamDialog({ ...teamDialog, emoji: e.target.value })
-                    }
-                    placeholder="👑"
-                    maxLength={4}
-                    className="h-11 border-foreground text-center text-lg"
-                  />
-                </div>
+              </div>
+              <div>
+                <Label htmlFor="team-name" className="grid-label mb-1.5 block">
+                  Name
+                </Label>
+                <Input
+                  id="team-name"
+                  value={teamDialog.name}
+                  onChange={(e) =>
+                    setTeamDialog({ ...teamDialog, name: e.target.value })
+                  }
+                  maxLength={40}
+                  className="h-11 border-foreground"
+                />
               </div>
               <div>
                 <Label htmlFor="team-rank" className="grid-label mb-1.5 block">
                   Rank
                 </Label>
-                <Input
-                  id="team-rank"
+                <Select
                   value={teamDialog.rank}
-                  onChange={(e) =>
-                    setTeamDialog({ ...teamDialog, rank: e.target.value })
-                  }
-                  placeholder="Owner, Admin, Moderator, Helper…"
-                  maxLength={30}
-                  className="h-11 border-foreground"
-                />
+                  onValueChange={(v) => setTeamDialog({ ...teamDialog, rank: v })}
+                >
+                  <SelectTrigger id="team-rank" className="h-11 w-full border-foreground">
+                    <SelectValue placeholder="Pick a rank" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TEAM_RANKS.map((r) => (
+                      <SelectItem key={r} value={r}>
+                        {r}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <Label htmlFor="team-tagline" className="grid-label mb-1.5 block">
@@ -1273,6 +1393,7 @@ export default function Admin() {
               onClick={saveTeamMember}
               disabled={
                 savingTeam ||
+                uploadingPhoto ||
                 !teamDialog ||
                 teamDialog.name.trim().length < 1 ||
                 teamDialog.rank.trim().length < 1
