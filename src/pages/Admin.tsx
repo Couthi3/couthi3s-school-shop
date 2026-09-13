@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { SwissHeader } from "@/components/SwissHeader";
 import { api } from "../convex/_generated/api";
@@ -36,6 +37,7 @@ import {
   Pin,
   PinOff,
   ShieldCheck,
+  TriangleAlert,
   Trash2,
   User,
   UserCheck,
@@ -80,6 +82,7 @@ export default function Admin() {
 
   // Announcements
   const [announcementText, setAnnouncementText] = useState("");
+  const [announcementUrgent, setAnnouncementUrgent] = useState(false);
   const [postingAnnouncement, setPostingAnnouncement] = useState(false);
 
   // Edit-shop dialog
@@ -91,9 +94,14 @@ export default function Admin() {
     if (!announcementText.trim()) return;
     setPostingAnnouncement(true);
     try {
-      await postAnnouncement({ text: announcementText });
+      await postAnnouncement({ text: announcementText, urgent: announcementUrgent });
       setAnnouncementText("");
-      toast.success("Announcement posted — visible on every page");
+      setAnnouncementUrgent(false);
+      toast.success(
+        announcementUrgent
+          ? "Urgent announcement posted — every visitor sees it until you take it down"
+          : "Announcement posted — visible on every page",
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
     } finally {
@@ -357,26 +365,48 @@ export default function Admin() {
                   rows={2}
                   className="mt-3 resize-none border-foreground"
                 />
-                <div className="mt-3 flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">
-                    {announcementText.length}/200 · replaces the current
-                    announcement
-                  </span>
-                  <Button
-                    type="submit"
-                    size="sm"
-                    disabled={
-                      postingAnnouncement || !announcementText.trim()
-                    }
-                    className="gap-1.5"
-                  >
-                    {postingAnnouncement ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <Megaphone className="size-3.5" />
-                    )}
-                    Publish
-                  </Button>
+                <div className="mt-3 flex items-start justify-between gap-4">
+                  <div className="space-y-1.5">
+                    <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide">
+                      <Switch
+                        checked={announcementUrgent}
+                        onCheckedChange={setAnnouncementUrgent}
+                        aria-label="Mark announcement as urgent"
+                      />
+                      <TriangleAlert
+                        className={`size-3.5 ${announcementUrgent ? "text-destructive" : "text-muted-foreground"}`}
+                      />
+                      Urgent
+                    </label>
+                    <p className="max-w-xs text-[11px] leading-4 text-muted-foreground">
+                      Urgent = red hazard-striped bar with a blinking alert.
+                      Cannot be dismissed by visitors — it stays up until you
+                      take it down.
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="text-xs text-muted-foreground">
+                      {announcementText.length}/200 · replaces the current
+                      announcement
+                    </span>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      disabled={
+                        postingAnnouncement || !announcementText.trim()
+                      }
+                      className={announcementUrgent ? "gap-1.5 bg-destructive text-white hover:bg-destructive/90" : "gap-1.5"}
+                    >
+                      {postingAnnouncement ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : announcementUrgent ? (
+                        <TriangleAlert className="size-3.5" />
+                      ) : (
+                        <Megaphone className="size-3.5" />
+                      )}
+                      {announcementUrgent ? "Publish urgent" : "Publish"}
+                    </Button>
+                  </div>
                 </div>
               </form>
               {announcements !== undefined && announcements.length > 0 && (
@@ -388,12 +418,29 @@ export default function Admin() {
                     >
                       <span
                         className={`inline-block size-2 shrink-0 ${
-                          a.active ? "bg-primary" : "bg-muted-foreground/40"
+                          a.active
+                            ? a.urgent
+                              ? "announcement-blink bg-destructive"
+                              : "bg-primary"
+                            : "bg-muted-foreground/40"
                         }`}
-                        title={a.active ? "Live" : "Retired"}
+                        title={
+                          a.active
+                            ? a.urgent
+                              ? "Live · urgent"
+                              : "Live"
+                            : "Retired"
+                        }
                       />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm">{a.text}</p>
+                        <p className="truncate text-sm">
+                          {a.urgent && (
+                            <span className="mr-1.5 inline-block bg-destructive px-1 text-[10px] font-bold uppercase tracking-widest text-white">
+                              Urgent
+                            </span>
+                          )}
+                          {a.text}
+                        </p>
                         <p className="text-[11px] text-muted-foreground">
                           {new Date(a.createdAt).toLocaleString()}
                         </p>

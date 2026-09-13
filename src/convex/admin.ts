@@ -296,7 +296,12 @@ export const activeAnnouncement = query({
       .order("desc")
       .first();
     if (!row) return null;
-    return { _id: row._id, text: row.text, createdAt: row.createdAt };
+    return {
+      _id: row._id,
+      text: row.text,
+      urgent: row.urgent === true,
+      createdAt: row.createdAt,
+    };
   },
 });
 
@@ -315,7 +320,7 @@ export const allAnnouncements = query({
  * automatically retires the previous active announcement.
  */
 export const postAnnouncement = mutation({
-  args: { text: v.string() },
+  args: { text: v.string(), urgent: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     if (!(await currentIsAdmin(ctx))) throw new Error("Admin access required");
     const text = args.text.trim();
@@ -333,6 +338,7 @@ export const postAnnouncement = mutation({
     await ctx.db.insert("announcements", {
       text,
       active: true,
+      urgent: args.urgent === true,
       createdAt: Date.now(),
     });
     return { ok: true as const };

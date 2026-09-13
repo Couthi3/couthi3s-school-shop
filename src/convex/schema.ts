@@ -78,10 +78,12 @@ const schema = defineSchema(
     }).index("by_shop", ["shopId"]),
 
     // Global announcements posted by the site admin. The newest active one
-    // is displayed site-wide on every page.
+    // is displayed site-wide on every page. Urgent ones get a loud red
+    // treatment and cannot be dismissed.
     announcements: defineTable({
       text: v.string(),
       active: v.boolean(),
+      urgent: v.optional(v.boolean()),
       createdAt: v.number(),
     }).index("by_active", ["active", "createdAt"]),
 

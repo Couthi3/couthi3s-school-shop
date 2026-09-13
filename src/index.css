@@ -162,3 +162,46 @@
 .rule-thick {
   border-top: 4px solid var(--foreground);
 }
+
+/* ----------------------------- announcements ------------------------------ */
+
+@keyframes announcement-blink {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  56%,
+  100% {
+    opacity: 0.2;
+  }
+}
+
+@keyframes announcement-stripes {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 56px 0;
+  }
+}
+
+/* Moving hazard stripes for urgent announcements. */
+.announcement-hazard {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(0, 0, 0, 0.22) 0 14px,
+    transparent 14px 28px
+  );
+  animation: announcement-stripes 1.2s linear infinite;
+}
+
+.announcement-blink {
+  animation: announcement-blink 1.1s steps(1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .announcement-hazard,
+  .announcement-blink {
+    animation: none;
+  }
+}
