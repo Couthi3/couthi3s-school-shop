@@ -11,6 +11,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 import "./types/global.d.ts";
+import { initAppColor } from "./lib/app-color";
 
 // --- Stale-build recovery ---------------------------------------------------
 // After a new build is deployed, an already-open tab still references old
@@ -56,8 +57,12 @@ window.addEventListener("unhandledrejection", (event) => {
   if (isStaleChunkMessage(reason?.message ?? reason)) recoverFromStaleChunk();
 });
 
+// Restore the visitor's site color choice before first paint of the app.
+initAppColor();
+
 // Lazy load route components for better code splitting
-const Landing = lazy(() => import("./pages/Landing.tsx"));
+const Home = lazy(() => import("./pages/Home.tsx"));
+const Shops = lazy(() => import("./pages/Shops.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const CreateShop = lazy(() => import("./pages/CreateShop.tsx"));
 const ShopSignIn = lazy(() => import("./pages/ShopSignIn.tsx"));
@@ -112,7 +117,8 @@ createRoot(document.getElementById("root")!).render(
           <RouteSyncer />
           <Suspense fallback={<RouteLoading />}>
             <Routes>
-              <Route path="/" element={<Landing />} />
+              <Route path="/" element={<Home />} />
+              <Route path="/shops" element={<Shops />} />
               <Route
                 path="/auth"
                 element={<AuthPage redirectAfterAuth="/manage" />}

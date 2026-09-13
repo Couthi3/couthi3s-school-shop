@@ -4,6 +4,7 @@ import { api } from "@/convex/_generated/api";
 import { LogOut, ShieldCheck, Store } from "lucide-react";
 import { useNavigate, Link } from "react-router";
 import { Button } from "./ui/button";
+import { ColorPicker } from "./ColorPicker";
 
 export function SwissHeader() {
   const { isAuthenticated, signOut } = useAuth();
@@ -27,7 +28,7 @@ export function SwissHeader() {
             <Store className="size-4 text-primary-foreground" strokeWidth={2.5} />
           </span>
           <span className="text-sm font-bold uppercase tracking-[0.18em]">
-            Ralsei's School Shops
+            School Shops
           </span>
         </Link>
 
@@ -67,6 +68,7 @@ export function SwissHeader() {
               <Link to="/auth">Sign in</Link>
             </Button>
           )}
+          <ColorPicker />
         </nav>
       </div>
     </header>

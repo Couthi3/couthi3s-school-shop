@@ -181,6 +181,63 @@ export const saveShopProfile = mutation({
   },
 });
 
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+const FONT_IDS = ["system", "mono", "rounded", "serif"];
+const CORNER_IDS = ["square", "soft", "round"];
+
+/**
+ * Save the shop's personal theme from the theme editor. Fields arrive
+ * pre-shaped from the client; validated defensively here.
+ */
+export const saveShopTheme = mutation({
+  args: {
+    shopId: v.id("shops"),
+    accent: v.string(),
+    accentText: v.string(),
+    page: v.string(),
+    pageText: v.string(),
+    font: v.string(),
+    corners: v.string(),
+    emoji: v.string(),
+    banner: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await assertShopAccess(ctx, args.shopId);
+
+    const accent = args.accent.trim();
+    const accentText = args.accentText.trim();
+    const page = args.page.trim();
+    const pageText = args.pageText.trim();
+    if (!HEX_COLOR.test(accent)) throw new Error("Accent must be a hex color");
+    if (!HEX_COLOR.test(accentText))
+      throw new Error("Accent text must be a hex color");
+    if (!HEX_COLOR.test(page)) throw new Error("Page color must be a hex color");
+    if (!HEX_COLOR.test(pageText))
+      throw new Error("Page text must be a hex color");
+    if (!FONT_IDS.includes(args.font)) throw new Error("Unknown font");
+    if (!CORNER_IDS.includes(args.corners)) throw new Error("Unknown corner style");
+    const emoji = args.emoji.trim() || "🏪";
+    if (Array.from(emoji).length > 4)
+      throw new Error("Emoji is too long");
+    const banner = args.banner?.trim() || undefined;
+    if (banner && banner.length > 120)
+      throw new Error("Banner is too long (max 120)");
+
+    await ctx.db.patch(args.shopId, {
+      theme: {
+        accent,
+        accentText,
+        page,
+        pageText,
+        font: args.font,
+        corners: args.corners,
+        emoji,
+        banner,
+      },
+    });
+  },
+});
+
 /**
  * Replace the shop's pickup-period list, e.g.
  * ["Before school", "Period 1 — Math", "Period 3 — Science"].
@@ -295,6 +352,7 @@ export const publicShop = query({
       name: shop.name,
       description: shop.description,
       periods: shop.periods ?? DEFAULT_PERIODS,
+      theme: shop.theme ?? null,
       items: items
         .filter((i) => i.available)
         .sort((a, b) => a.sortOrder - b.sortOrder)
@@ -302,6 +360,7 @@ export const publicShop = query({
           _id: i._id,
           name: i.name,
           description: i.description,
+          emoji: i.emoji ?? null,
           priceCents: i.priceCents,
         })),
     };
@@ -328,6 +387,7 @@ export const saveItem = mutation({
     itemId: v.optional(v.id("items")),
     name: v.string(),
     description: v.optional(v.string()),
+    emoji: v.optional(v.string()),
     priceCents: v.number(),
     available: v.boolean(),
   },
@@ -344,6 +404,9 @@ export const saveItem = mutation({
       throw new Error("Price must be zero or more");
     if (args.priceCents > 100000000)
       throw new Error("Price is too large");
+    const emoji = args.emoji?.trim() || undefined;
+    if (emoji && Array.from(emoji).length > 4)
+      throw new Error("Emoji is too long");
 
     if (args.itemId) {
       const item = await ctx.db.get(args.itemId);
@@ -352,6 +415,7 @@ export const saveItem = mutation({
       await ctx.db.patch(args.itemId, {
         name,
         description,
+        emoji,
         priceCents: Math.round(args.priceCents),
         available: args.available,
       });
@@ -367,6 +431,7 @@ export const saveItem = mutation({
       shopId: args.shopId,
       name,
       description,
+      emoji,
       priceCents: Math.round(args.priceCents),
       available: args.available,
       sortOrder: maxOrder + 1,

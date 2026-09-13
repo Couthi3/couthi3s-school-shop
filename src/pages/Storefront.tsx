@@ -21,10 +21,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "../convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { Loader2, Minus, Package, Plus, ShoppingBag } from "lucide-react";
-import { useState } from "react";
-import { useParams } from "react-router";
+import { useMemo, useState } from "react";
+import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { formatPrice } from "@/lib/shop-format";
+import { resolveShopTheme, shopThemeStyle } from "@/lib/shop-theme";
 
 export default function Storefront() {
   const { shopId } = useParams<{ shopId: string }>();
@@ -33,9 +34,16 @@ export default function Storefront() {
   });
   const placeOrder = useMutation(api.shops.placeOrder);
 
+  const theme = useMemo(() => resolveShopTheme(shop?.theme), [shop?.theme]);
+  const themedStyle = useMemo(
+    () => (shop ? shopThemeStyle(theme) : undefined),
+    [shop, theme],
+  );
+
   const [dialogItem, setDialogItem] = useState<{
     _id: string;
     name: string;
+    emoji?: string | null;
     priceCents: number;
   } | null>(null);
   const [buyerName, setBuyerName] = useState("");
@@ -47,6 +55,7 @@ export default function Storefront() {
   const openOrderDialog = (item: {
     _id: string;
     name: string;
+    emoji?: string | null;
     priceCents: number;
   }) => {
     setDialogItem(item);
@@ -82,30 +91,50 @@ export default function Storefront() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div
+      className="min-h-screen text-foreground"
+      style={themedStyle}
+    >
       <SwissHeader />
 
       {shop === undefined ? (
         <div className="container-swiss py-20 text-center">
-          <Loader2 className="mx-auto size-6 animate-spin text-muted-foreground" />
+          <Loader2 className="mx-auto size-6 animate-spin opacity-60" />
         </div>
       ) : shop === null ? (
         <div className="container-swiss py-20 text-center">
           <h1 className="text-3xl font-bold uppercase">Shop not found</h1>
           <p className="mt-3 text-muted-foreground">
             This shop doesn't exist.{" "}
-            <a href="/" className="underline hover:text-primary">
+            <Link to="/shops" className="underline hover:text-primary">
               Back to all shops
-            </a>
+            </Link>
           </p>
         </div>
       ) : (
         <>
+          {theme.banner && (
+            <div
+              className="border-b-2 border-foreground px-5 py-2.5 text-center text-xs font-bold uppercase tracking-wider"
+              style={{
+                background: theme.accent,
+                color: theme.accentText,
+              }}
+            >
+              {theme.banner}
+            </div>
+          )}
+
           <section className="border-b-2 border-foreground">
             <div className="container-swiss py-10 md:py-14">
               <div className="grid-label mb-5 flex items-center gap-2">
-                <span className="inline-block size-2.5 bg-primary" />
-                School shop
+                <span
+                  className="flex size-8 items-center justify-center text-2xl"
+                  aria-hidden
+                >
+                  {theme.emoji}
+                </span>
+                <span>School shop</span>
               </div>
               <h1 className="text-4xl font-bold uppercase tracking-tight md:text-6xl">
                 {shop.name}
@@ -123,7 +152,7 @@ export default function Storefront() {
                 {shop.periods.map((p) => (
                   <span
                     key={p}
-                    className="border border-foreground bg-background px-2 py-1 text-[10px] font-bold uppercase tracking-wide"
+                    className="border border-current px-2 py-1 text-[10px] font-bold uppercase tracking-wide opacity-80"
                   >
                     {p}
                   </span>
@@ -138,7 +167,7 @@ export default function Storefront() {
                 Items for sale
               </h2>
               {shop.items.length === 0 ? (
-                <div className="border border-foreground bg-background p-10 text-center">
+                <div className="border border-foreground bg-card p-10 text-center">
                   <Package className="mx-auto size-6 text-muted-foreground" />
                   <p className="mt-3 text-lg font-bold uppercase">
                     Nothing for sale yet
@@ -153,12 +182,23 @@ export default function Storefront() {
                   {shop.items.map((item) => (
                     <div
                       key={item._id}
-                      className="flex flex-col bg-background p-5"
+                      className="flex flex-col bg-card p-5"
+                      style={{ borderRadius: "var(--shop-radius, 0rem)" }}
                     >
-                      <div className="flex items-baseline justify-between gap-3">
-                        <h3 className="text-lg font-bold uppercase leading-tight">
-                          {item.name}
-                        </h3>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2.5">
+                          {item.emoji && (
+                            <span
+                              className="text-2xl leading-none"
+                              aria-hidden
+                            >
+                              {item.emoji}
+                            </span>
+                          )}
+                          <h3 className="text-lg font-bold uppercase leading-tight">
+                            {item.name}
+                          </h3>
+                        </div>
                         <span className="font-mono-swiss shrink-0 text-lg font-bold text-primary">
                           {formatPrice(item.priceCents)}
                         </span>
@@ -172,6 +212,7 @@ export default function Storefront() {
                         <Button
                           onClick={() => openOrderDialog(item)}
                           className="w-full gap-2 py-5 text-xs font-bold uppercase tracking-wider"
+                          style={{ borderRadius: "var(--shop-radius, 0rem)" }}
                         >
                           <ShoppingBag className="size-3.5" />
                           Order for pickup

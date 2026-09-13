@@ -17,20 +17,34 @@ import {
   Eye,
   Loader2,
   Package,
+  Palette,
   Plus,
+  RotateCcw,
   Save,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { PICKUP_PERIODS, formatPrice, formatTime, statusColor } from "@/lib/shop-format";
+import {
+  ITEM_EMOJI_CHOICES,
+  SHOP_EMOJI_CHOICES,
+  SHOP_THEME_PRESETS,
+  THEME_CORNERS,
+  THEME_FONTS,
+  resolveShopTheme,
+  shopThemeStyle,
+  type ShopTheme,
+} from "@/lib/shop-theme";
 
 type ItemDraft = {
   key: string;
   itemId: string | null;
   name: string;
   description: string;
+  emoji: string;
   price: string;
   available: boolean;
   saving: boolean;
@@ -42,6 +56,7 @@ const emptyDraft = (): ItemDraft => ({
   itemId: null,
   name: "",
   description: "",
+  emoji: "",
   price: "",
   available: true,
   saving: false,
@@ -77,6 +92,7 @@ export default function ManageShop() {
   const setOrderStatus = useMutation(api.shops.setOrderStatus);
   const saveProfile = useMutation(api.shops.saveShopProfile);
   const savePeriods = useMutation(api.shops.saveShopPeriods);
+  const saveTheme = useMutation(api.shops.saveShopTheme);
 
   const [drafts, setDrafts] = useState<ItemDraft[]>([emptyDraft()]);
   const [savingAll, setSavingAll] = useState(false);
@@ -85,6 +101,8 @@ export default function ManageShop() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [periodInputs, setPeriodInputs] = useState<string[]>([]);
   const [savingPeriods, setSavingPeriods] = useState(false);
+  const [themeDraft, setThemeDraft] = useState<ShopTheme | null>(null);
+  const [savingTheme, setSavingTheme] = useState(false);
 
   // Seed drafts from server items once they load.
   useEffect(() => {
@@ -95,6 +113,7 @@ export default function ManageShop() {
         itemId: i._id,
         name: i.name,
         description: i.description ?? "",
+        emoji: i.emoji ?? "",
         price: (i.priceCents / 100).toFixed(2),
         available: i.available,
         saving: false,
@@ -108,6 +127,7 @@ export default function ManageShop() {
       setShopName(shop.name);
       setShopDesc(shop.description ?? "");
       setPeriodInputs(shop.periods ?? [...PICKUP_PERIODS]);
+      setThemeDraft(resolveShopTheme(shop.theme));
     }
   }, [shop]);
 
@@ -135,6 +155,7 @@ export default function ManageShop() {
         itemId: (draft.itemId ?? undefined) as never,
         name: draft.name,
         description: draft.description || undefined,
+        emoji: draft.emoji || undefined,
         priceCents: cents,
         available: draft.available,
       });
@@ -221,6 +242,29 @@ export default function ManageShop() {
       toast.error(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSavingPeriods(false);
+    }
+  };
+
+  const handleSaveTheme = async () => {
+    if (!shopId || !themeDraft) return;
+    setSavingTheme(true);
+    try {
+      await saveTheme({
+        shopId,
+        accent: themeDraft.accent,
+        accentText: themeDraft.accentText,
+        page: themeDraft.page,
+        pageText: themeDraft.pageText,
+        font: themeDraft.font,
+        corners: themeDraft.corners,
+        emoji: themeDraft.emoji,
+        banner: themeDraft.banner,
+      });
+      toast.success("Theme saved — your storefront is restyled");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSavingTheme(false);
     }
   };
 
@@ -342,6 +386,13 @@ export default function ManageShop() {
               className="h-full rounded-none px-5 text-xs font-bold uppercase tracking-wider data-[state=active]:bg-background data-[state=active]:shadow-none"
             >
               Settings
+            </TabsTrigger>
+            <TabsTrigger
+              value="theme"
+              className="h-full rounded-none px-5 text-xs font-bold uppercase tracking-wider data-[state=active]:bg-background data-[state=active]:shadow-none"
+            >
+              <Palette className="mr-1.5 size-3.5" />
+              Theme
             </TabsTrigger>
           </TabsList>
 
@@ -555,6 +606,31 @@ export default function ManageShop() {
                           maxLength={200}
                         />
                       </div>
+                      <div className="mt-3">
+                        <Label className="grid-label mb-1.5 block">
+                          Item icon (optional)
+                        </Label>
+                        <div className="flex flex-wrap gap-1">
+                          {ITEM_EMOJI_CHOICES.map((em) => (
+                            <button
+                              key={em || "none"}
+                              type="button"
+                              title={em ? `Use ${em}` : "No icon"}
+                              aria-label={em ? `Use ${em}` : "No icon"}
+                              onClick={() =>
+                                updateDraft(draft.key, { emoji: em })
+                              }
+                              className={`flex size-9 items-center justify-center border text-lg ${
+                                draft.emoji === em
+                                  ? "border-foreground bg-muted"
+                                  : "border-border hover:border-foreground"
+                              }`}
+                            >
+                              {em || <span className="text-xs">None</span>}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                       {draft.saving && (
                         <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                           <Loader2 className="size-3 animate-spin" /> Saving…
@@ -593,6 +669,7 @@ export default function ManageShop() {
                           className="flex items-baseline justify-between gap-3 bg-background px-4 py-2.5"
                         >
                           <span className="text-sm font-bold uppercase">
+                            {d.emoji && <span className="mr-1.5">{d.emoji}</span>}
                             {d.name}
                           </span>
                           <span className="font-mono-swiss text-sm font-bold text-primary">
@@ -759,6 +836,378 @@ export default function ManageShop() {
                 </p>
               </div>
             </div>
+          </TabsContent>
+
+          {/* -------------------------------- THEME -------------------------------- */}
+          <TabsContent value="theme" className="mt-8">
+            {themeDraft && (
+              <div className="grid gap-8 lg:grid-cols-[1.2fr_1fr]">
+                <div>
+                  <h2 className="text-xl font-bold uppercase">Theme editor</h2>
+                  <p className="mt-1 max-w-md text-xs leading-4 text-muted-foreground">
+                    Make your storefront feel like yours — colors, fonts, corner
+                    style, an emoji badge and a banner. Everything applies to
+                    the preview live; press save to publish for buyers.
+                  </p>
+
+                  {/* Presets */}
+                  <div className="mt-6">
+                    <Label className="grid-label mb-2 block">Presets</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {SHOP_THEME_PRESETS.map((preset) => (
+                        <button
+                          key={preset.name}
+                          type="button"
+                          onClick={() => setThemeDraft(preset.theme)}
+                          className="flex items-center gap-2 border-2 border-foreground px-3 py-2 text-xs font-bold uppercase tracking-wide hover:bg-muted"
+                        >
+                          <Sparkles className="size-3 text-primary" />
+                          {preset.name}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setThemeDraft(resolveShopTheme(shop?.theme))
+                        }
+                        className="flex items-center gap-2 border-2 border-border px-3 py-2 text-xs font-bold uppercase tracking-wide text-muted-foreground hover:border-foreground hover:text-foreground"
+                      >
+                        <RotateCcw className="size-3" />
+                        Reset
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Colors */}
+                  <div className="mt-8 grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <Label className="grid-label mb-1.5 block">Accent</Label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={themeDraft.accent}
+                          onChange={(e) =>
+                            setThemeDraft((t) =>
+                              t ? { ...t, accent: e.target.value } : t,
+                            )
+                          }
+                          className="size-10 cursor-pointer border-2 border-foreground bg-background p-0.5"
+                          aria-label="Accent color"
+                        />
+                        <Input
+                          value={themeDraft.accent.toUpperCase()}
+                          onChange={(e) =>
+                            setThemeDraft((t) =>
+                              t ? { ...t, accent: e.target.value } : t,
+                            )
+                          }
+                          maxLength={7}
+                          className="h-10 border-foreground font-mono-swiss text-xs uppercase"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="grid-label mb-1.5 block">
+                        Accent text
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={themeDraft.accentText}
+                          onChange={(e) =>
+                            setThemeDraft((t) =>
+                              t ? { ...t, accentText: e.target.value } : t,
+                            )
+                          }
+                          className="size-10 cursor-pointer border-2 border-foreground bg-background p-0.5"
+                          aria-label="Accent text color"
+                        />
+                        <Input
+                          value={themeDraft.accentText.toUpperCase()}
+                          onChange={(e) =>
+                            setThemeDraft((t) =>
+                              t ? { ...t, accentText: e.target.value } : t,
+                            )
+                          }
+                          maxLength={7}
+                          className="h-10 border-foreground font-mono-swiss text-xs uppercase"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="grid-label mb-1.5 block">
+                        Page background
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={themeDraft.page}
+                          onChange={(e) =>
+                            setThemeDraft((t) =>
+                              t ? { ...t, page: e.target.value } : t,
+                            )
+                          }
+                          className="size-10 cursor-pointer border-2 border-foreground bg-background p-0.5"
+                          aria-label="Page background color"
+                        />
+                        <Input
+                          value={themeDraft.page.toUpperCase()}
+                          onChange={(e) =>
+                            setThemeDraft((t) =>
+                              t ? { ...t, page: e.target.value } : t,
+                            )
+                          }
+                          maxLength={7}
+                          className="h-10 border-foreground font-mono-swiss text-xs uppercase"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="grid-label mb-1.5 block">Body text</Label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={themeDraft.pageText}
+                          onChange={(e) =>
+                            setThemeDraft((t) =>
+                              t ? { ...t, pageText: e.target.value } : t,
+                            )
+                          }
+                          className="size-10 cursor-pointer border-2 border-foreground bg-background p-0.5"
+                          aria-label="Body text color"
+                        />
+                        <Input
+                          value={themeDraft.pageText.toUpperCase()}
+                          onChange={(e) =>
+                            setThemeDraft((t) =>
+                              t ? { ...t, pageText: e.target.value } : t,
+                            )
+                          }
+                          maxLength={7}
+                          className="h-10 border-foreground font-mono-swiss text-xs uppercase"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Font + corners */}
+                  <div className="mt-8 grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <Label className="grid-label mb-1.5 block">Typeface</Label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {THEME_FONTS.map((f) => (
+                          <button
+                            key={f.id}
+                            type="button"
+                            onClick={() =>
+                              setThemeDraft((t) =>
+                                t ? { ...t, font: f.id } : t,
+                              )
+                            }
+                            className={`border-2 px-3 py-2 text-sm ${
+                              themeDraft.font === f.id
+                                ? "border-foreground bg-muted font-bold"
+                                : "border-border hover:border-foreground"
+                            }`}
+                            style={{ fontFamily: f.stack }}
+                          >
+                            {f.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="grid-label mb-1.5 block">Corners</Label>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {THEME_CORNERS.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() =>
+                              setThemeDraft((t) =>
+                                t ? { ...t, corners: c.id } : t,
+                              )
+                            }
+                            className={`border-2 px-2 py-2 text-xs font-bold uppercase tracking-wide ${
+                              themeDraft.corners === c.id
+                                ? "border-foreground bg-muted"
+                                : "border-border hover:border-foreground"
+                            }`}
+                          >
+                            <span
+                              className="mx-auto mb-1 block h-4 w-4 border-2 border-current"
+                              style={{ borderRadius: c.radius }}
+                            />
+                            {c.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Shop emoji */}
+                  <div className="mt-8">
+                    <Label className="grid-label mb-2 block">Shop emoji</Label>
+                    <div className="flex flex-wrap gap-1">
+                      {SHOP_EMOJI_CHOICES.map((em) => (
+                        <button
+                          key={em}
+                          type="button"
+                          title={`Use ${em}`}
+                          aria-label={`Use ${em}`}
+                          onClick={() =>
+                            setThemeDraft((t) =>
+                              t ? { ...t, emoji: em } : t,
+                            )
+                          }
+                          className={`flex size-9 items-center justify-center border text-lg ${
+                            themeDraft.emoji === em
+                              ? "border-foreground bg-muted"
+                              : "border-border hover:border-foreground"
+                          }`}
+                        >
+                          {em}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Banner */}
+                  <div className="mt-8">
+                    <Label
+                      htmlFor="theme-banner"
+                      className="grid-label mb-1.5 block"
+                    >
+                      Banner (optional)
+                    </Label>
+                    <Input
+                      id="theme-banner"
+                      value={themeDraft.banner ?? ""}
+                      onChange={(e) =>
+                        setThemeDraft((t) =>
+                          t
+                            ? {
+                                ...t,
+                                banner: e.target.value || undefined,
+                              }
+                            : t,
+                        )
+                      }
+                      placeholder="Fresh cookies every morning!"
+                      maxLength={120}
+                      className="h-10 border-foreground"
+                    />
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      Shown in the accent color strip at the top of your page.
+                    </p>
+                  </div>
+
+                  <Button
+                    onClick={handleSaveTheme}
+                    disabled={savingTheme}
+                    className="mt-8 gap-1.5"
+                  >
+                    {savingTheme ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Save className="size-4" />
+                    )}
+                    Save theme
+                  </Button>
+                </div>
+
+                {/* Live themed preview */}
+                <div>
+                  <h2 className="mb-4 text-xl font-bold uppercase">
+                    Live preview
+                  </h2>
+                  <p className="mb-4 text-xs leading-4 text-muted-foreground">
+                    Exactly what buyers see — updates as you edit.
+                  </p>
+                  <div
+                    className="border-2 border-foreground"
+                    style={shopThemeStyle(themeDraft)}
+                  >
+                    {themeDraft.banner && (
+                      <div
+                        className="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider"
+                        style={{
+                          background: themeDraft.accent,
+                          color: themeDraft.accentText,
+                        }}
+                      >
+                        {themeDraft.banner}
+                      </div>
+                    )}
+                    <div className="p-5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl" aria-hidden>
+                          {themeDraft.emoji}
+                        </span>
+                        <span className="text-[10px] font-bold uppercase tracking-[0.14em] opacity-60">
+                          School shop
+                        </span>
+                      </div>
+                      <h3 className="mt-2 text-2xl font-bold uppercase leading-tight">
+                        {shopName || "Your shop"}
+                      </h3>
+                      <p className="mt-1 text-xs opacity-70">
+                        {shopDesc || "Your description appears here."}
+                      </p>
+                      <div className="mt-4 space-y-px">
+                        {drafts
+                          .filter((d) => d.available && d.name.trim())
+                          .slice(0, 4)
+                          .map((d) => (
+                            <div
+                              key={d.key}
+                              className="flex items-baseline justify-between gap-3 bg-card px-3 py-2"
+                              style={{
+                                borderRadius: "var(--shop-radius, 0rem)",
+                              }}
+                            >
+                              <span className="text-xs font-bold uppercase">
+                                {d.emoji && (
+                                  <span className="mr-1">{d.emoji}</span>
+                                )}
+                                {d.name}
+                              </span>
+                              <span
+                                className="font-mono-swiss text-xs font-bold"
+                                style={{ color: themeDraft.accent }}
+                              >
+                                {d.price
+                                  ? formatPrice(
+                                      Math.round(
+                                        parseFloat(d.price || "0") * 100,
+                                      ),
+                                    )
+                                  : "—"}
+                              </span>
+                            </div>
+                          ))}
+                        {drafts.filter((d) => d.available && d.name.trim())
+                          .length === 0 && (
+                          <div className="px-3 py-4 text-center text-xs opacity-60">
+                            Available items appear here.
+                          </div>
+                        )}
+                      </div>
+                      <div
+                        className="mt-4 px-4 py-2.5 text-center text-xs font-bold uppercase tracking-wider"
+                        style={{
+                          background: themeDraft.accent,
+                          color: themeDraft.accentText,
+                          borderRadius: "var(--shop-radius, 0rem)",
+                        }}
+                      >
+                        Order for pickup
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </div>

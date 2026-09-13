@@ -26,6 +26,18 @@ const schema = defineSchema(
       featured: v.boolean(), // hand-picked by the site admin
       featuredOrder: v.number(), // admin-controlled ordering of featured shops
       periods: v.optional(v.array(v.string())), // owner-defined pickup periods, e.g. "Period 1 — Math"
+      theme: v.optional(
+        v.object({
+          accent: v.string(), // hex accent color
+          accentText: v.string(), // hex text color used on accent surfaces
+          page: v.string(), // hex page background
+          pageText: v.string(), // hex body text on page background
+          font: v.string(), // typography choice id
+          corners: v.string(), // "square" | "soft" | "round"
+          emoji: v.string(), // shop emoji badge
+          banner: v.optional(v.string()), // top-of-page announcement strip
+        }),
+      ),
     })
       .index("by_owner", ["ownerId"])
       .index("by_featured", ["featured", "featuredOrder"]),
@@ -59,6 +71,7 @@ const schema = defineSchema(
       shopId: v.id("shops"),
       name: v.string(),
       description: v.optional(v.string()),
+      emoji: v.optional(v.string()), // per-item emoji chosen by the owner
       priceCents: v.number(),
       available: v.boolean(),
       sortOrder: v.number(),
