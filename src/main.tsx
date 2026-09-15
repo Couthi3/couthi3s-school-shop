@@ -83,7 +83,20 @@ function RouteLoading() {
   );
 }
 
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
+const convexUrl = import.meta.env.VITE_CONVEX_URL as string | undefined;
+if (!convexUrl) {
+  // Fail loudly and clearly when the build was made without the Convex URL
+  // (e.g. a Cloudflare deploy that forgot the VITE_CONVEX_URL env var).
+  document.body.innerHTML =
+    '<div style="font-family:system-ui,sans-serif;max-width:32rem;margin:15vh auto 0;padding:0 1.5rem;color:#111">' +
+    '<h1 style="font-size:1.25rem;font-weight:700;margin:0 0 .5rem">Missing configuration</h1>'
+    + '<p style="font-size:.95rem;line-height:1.5;margin:0">This build has no <code>VITE_CONVEX_URL</code>. '
+    + 'Set it in your host&rsquo;s environment variables (<code>https://&lt;your-deployment&gt;.convex.cloud</code>) '
+    + 'and rebuild. See CLOUDFLARE.md in the repo for the full checklist.</p></div>';
+  throw new Error("VITE_CONVEX_URL is not set");
+}
+
+const convex = new ConvexReactClient(convexUrl);
 
 
 

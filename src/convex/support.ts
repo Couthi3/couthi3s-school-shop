@@ -172,6 +172,25 @@ export const updateTicket = mutation({
 });
 
 /** Delete a ticket permanently. */
+// Record the GitHub issue created for a ticket (called after the
+// createIssueFromTicket action succeeds). Admin with tickets cap.
+export const linkTicketIssue = mutation({
+  args: {
+    ticketId: v.id("tickets"),
+    issueUrl: v.string(),
+    issueNumber: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await requireAdminLevel(ctx, CAP.tickets);
+    const ticket = await ctx.db.get(args.ticketId);
+    if (!ticket) throw new Error("Ticket not found");
+    await ctx.db.patch(args.ticketId, {
+      githubIssueUrl: args.issueUrl,
+      githubIssueNumber: args.issueNumber,
+    });
+  },
+});
+
 export const deleteTicket = mutation({
   args: { ticketId: v.id("tickets") },
   handler: async (ctx, args) => {

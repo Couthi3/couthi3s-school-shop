@@ -15,13 +15,16 @@
 import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { CAP } from "./adminRanks";
-import { currentAdminLevel } from "./support";
+import { api } from "./_generated/api";
 
 const GITHUB_API = "https://api.github.com";
 
-// Same staff gate the tickets queue uses.
-const requireTicketCap = async (ctx: never): Promise<boolean> => {
-  const level = await currentAdminLevel(ctx);
+// Same staff gate the tickets queue uses. Actions can't read the DB
+// directly, so the level check runs as a query with the same auth context.
+const requireTicketCap = async (
+  ctx: { runQuery: (ref: unknown) => Promise<number> },
+): Promise<boolean> => {
+  const level = await ctx.runQuery(api.support.myAdminLevel);
   return level >= CAP.tickets;
 };
 

@@ -149,6 +149,8 @@ const schema = defineSchema(
         v.literal("resolved"),
       ),
       adminNote: v.optional(v.string()), // private reply from the site admin
+      githubIssueUrl: v.optional(v.string()), // linked GitHub issue, once pushed
+      githubIssueNumber: v.optional(v.number()),
       createdAt: v.number(),
     }).index("by_status", ["status"]),
 

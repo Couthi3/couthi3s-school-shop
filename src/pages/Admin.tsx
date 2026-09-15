@@ -38,7 +38,7 @@ import {
 } from "../convex/adminRanks";
 import { api } from "../convex/_generated/api";
 import { useAuthActions } from "@convex-dev/auth/react";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import {
   ArrowDown,
   ArrowUp,
@@ -48,6 +48,7 @@ import {
   Loader2,
   LogOut,
   Megaphone,
+  Github,
   Pencil,
   Pin,
   PinOff,
@@ -104,6 +105,9 @@ export default function Admin() {
   );
   const updateTicket = useMutation(api.support.updateTicket);
   const deleteTicket = useMutation(api.support.deleteTicket);
+  const linkTicketIssue = useMutation(api.support.linkTicketIssue);
+  const githubTest = useAction(api.github.testConnection);
+  const githubPush = useAction(api.github.createIssueFromTicket);
   // Only the Owner account (Couthi3) may manage the roster — matches the
   // server-side requireHeadAdmin gate.
   const isHeadAdmin = useQuery(api.support.isHeadAdmin);
@@ -264,6 +268,61 @@ export default function Admin() {
       toast.success("Ticket deleted");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  };
+
+  // ---- GitHub integration (tickets → issues) ----
+  const [ghStatus, setGhStatus] = useState<
+    { ok: boolean; text: string; url?: string } | null
+  >(null);
+  const [ghTesting, setGhTesting] = useState(false);
+  const [ghPushing, setGhPushing] = useState<string | null>(null); // ticketId in flight
+
+  const handleGithubTest = async () => {
+    setGhTesting(true);
+    setGhStatus(null);
+    try {
+      const r = await githubTest({});
+      if (r.ok) {
+        setGhStatus({
+          ok: true,
+          text: `Connected as ${r.login ?? "?"} → ${r.repoFull} · ${r.openIssues ?? 0} open issues`,
+          url: `https://github.com/${r.repoFull}`,
+        });
+      } else {
+        setGhStatus({ ok: false, text: r.error ?? "Connection failed" });
+      }
+    } catch (err) {
+      setGhStatus({ ok: false, text: err instanceof Error ? err.message : "Connection failed" });
+    } finally {
+      setGhTesting(false);
+    }
+  };
+
+  const handleGithubPush = async (ticketId: string, t: { title: string; body: string; category: string; contact?: string | null; githubIssueUrl?: string | null }) => {
+    if (t.githubIssueUrl) return; // already pushed
+    setGhPushing(ticketId);
+    try {
+      const r = await githubPush({
+        title: t.title,
+        body: t.body,
+        category: t.category as "issue" | "suggestion" | "staff",
+        submitter: t.contact ?? undefined,
+      });
+      if (!r.ok || !r.issueUrl || r.issueNumber === undefined) {
+        toast.error(r.error ?? "GitHub push failed");
+        return;
+      }
+      await linkTicketIssue({
+        ticketId: ticketId as never,
+        issueUrl: r.issueUrl,
+        issueNumber: r.issueNumber,
+      });
+      toast.success(`GitHub issue #${r.issueNumber} created`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "GitHub push failed");
+    } finally {
+      setGhPushing(null);
     }
   };
 
@@ -1093,12 +1152,40 @@ export default function Admin() {
                 {/* Tickets — Staff and up */}
                 {level >= 2 && (
                 <section className="mt-12">
-                  <h2 className="mb-5 text-xl font-bold uppercase">
-                    Tickets
-                    <span className="ml-2 font-mono-swiss text-sm text-muted-foreground">
-                      {tickets?.length ?? 0}
-                    </span>
-                  </h2>
+                  <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="text-xl font-bold uppercase">
+                      Tickets
+                      <span className="ml-2 font-mono-swiss text-sm text-muted-foreground">
+                        {tickets?.length ?? 0}
+                      </span>
+                    </h2>
+                    <div className="flex items-center gap-2">
+                      {ghStatus && (
+                        <span
+                          className={`max-w-md truncate border-2 border-foreground px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                            ghStatus.ok ? "bg-[var(--swiss-blue)] text-white" : "bg-[var(--swiss-red)] text-white"
+                          }`}
+                          title={ghStatus.text}
+                        >
+                          {ghStatus.ok ? "✓ " : "✕ "}{ghStatus.text}
+                        </span>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-foreground gap-1.5"
+                        onClick={handleGithubTest}
+                        disabled={ghTesting}
+                      >
+                        {ghTesting ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <Github className="size-3.5" />
+                        )}
+                        Test GitHub
+                      </Button>
+                    </div>
+                  </div>
                   {tickets === undefined ? (
                     <div className="py-6 text-center">
                       <Loader2 className="mx-auto size-5 animate-spin text-muted-foreground" />
@@ -1124,6 +1211,33 @@ export default function Admin() {
                               </span>
                             </div>
                             <div className="flex items-center gap-1.5">
+                              {t.githubIssueUrl ? (
+                                <a
+                                  href={t.githubIssueUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 border-2 border-foreground px-2 py-1 text-[10px] font-bold uppercase tracking-wider hover:bg-foreground hover:text-background"
+                                  title={`GitHub issue #${t.githubIssueNumber}`}
+                                >
+                                  <Github className="size-3" />#{t.githubIssueNumber}
+                                </a>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-foreground gap-1.5"
+                                  disabled={ghPushing === t._id}
+                                  onClick={() => handleGithubPush(t._id, t)}
+                                  title="Create a labeled issue in the GitHub repo"
+                                >
+                                  {ghPushing === t._id ? (
+                                    <Loader2 className="size-3.5 animate-spin" />
+                                  ) : (
+                                    <Github className="size-3.5" />
+                                  )}
+                                  Push
+                                </Button>
+                              )}
                               <span
                                 className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${
                                   t.status === "open"
